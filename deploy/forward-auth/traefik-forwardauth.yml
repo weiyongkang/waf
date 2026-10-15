@@ -1,0 +1,113 @@
+# =============================================================================
+# Traefik forward-auth 接入配置（动态配置 / file provider）
+# =============================================================================
+#
+# 版本要求（需求 R9）：
+#   - forwardBody 需要 Traefik >= v2.11（v3.x 同名参数）；
+#   - errors 中间件的 query 模板占位符在 v2.11+ / v3.x 可用；
+#   - 部署前请用 `traefik version` 确认版本，升级 Traefik 属于变更流程的一部分。
+#
+# 与 Nginx(OpenResty) 通道的差异（设计文档 §3.3 / §4.3.3）：
+#   1) forwardBody: true 时请求体随鉴权子请求送达，因此可以做请求体检测；
+#   2) Traefik 不会把鉴权子请求的响应体交给客户端，
+#      因此 JSON 错误体必须通过 errors 中间件回源到 WAF 的 /waf/deny 渲染端点；
+#   3) errors 中间件的 query 模板无法读取鉴权响应头（没有 auth_request_set 等价能力），
+#      因此这里把 {status} 作为 code 传给渲染端点，由 WAF 依据状态码反推错误码。
+#
+# 装载方式（静态配置中声明动态配置目录）：
+#   providers:
+#     file:
+#       directory: /etc/traefik/dynamic
+#       watch: true
+
+http:
+  middlewares:
+    # -------------------------------------------------------------------------
+    # 鉴权中间件：把请求（含请求体）送交 WAF 判定
+    # -------------------------------------------------------------------------
+    waf-auth:
+      forwardAuth:
+        # WAF 的 forward-auth 端点地址（容器编排场景使用服务名 waf）。
+        address: "http://waf:9080/waf/auth"
+
+        # 信任并透传 X-Forwarded-* 头。
+        # 安全前提：WAF 侧必须配置 ingress.client_ip.trusted_proxies 覆盖 Traefik 的出口网段，
+        # 否则 WAF 无法安全地推导真实客户端 IP（验收项 A10）。
+        trustForwardHeader: true
+
+        # 关键开关：把请求体一并转发给鉴权服务（请求体检测的前提）。
+        # 代价是额外的带宽与内存开销，建议只对需要体检测的路由启用。
+        forwardBody: true
+
+        # 随鉴权子请求转发的请求体上限（字节）。
+        # 必须与 WAF 侧 ingress.body.max_bytes 保持同量级，
+        # 否则会出现「Traefik 已截断、WAF 以为收到完整请求体」的认知偏差。
+        maxBodySize: 1048576
+
+        # 刻意不设置 authRequestHeaders：
+        # Traefik 的语义是「未设置时把原始请求的全部请求头透传给鉴权服务」，
+        # 这正是请求体检测（Content-Type / Cookie / Referer 等）所需要的。
+        # 一旦显式列出，就变成白名单模式，漏掉任何一个头都可能导致检测退化。
+
+        # 把 WAF 回传的响应头透传给业务服务，便于日志串联与排障（需求 R22）。
+        # 注意：这些头只加到「转发给上游业务」的请求上，不会出现在客户端响应里。
+        authResponseHeaders:
+          - X-WAF-Request-Id
+          - X-WAF-Verdict
+          - X-WAF-Code
+          - X-WAF-Rule-Id
+          - X-WAF-Version
+
+    # -------------------------------------------------------------------------
+    # 错误渲染中间件：把 4xx/5xx 响应替换为 WAF 渲染的 JSON 错误体
+    # -------------------------------------------------------------------------
+    waf-errors:
+      errors:
+        # 需要接管的状态码区间（含鉴权失败与「失败关闭」场景）。
+        status:
+          - "400-599"
+
+        # 错误请求回源到 WAF 自身的渲染端点所在服务。
+        service: waf-deny
+
+        # 查询参数模板：
+        #   {status} 是 Traefik 提供的占位符，表示原始响应状态码。
+        #   WAF 的 /waf/deny 端点在 code 为纯数字时按 HTTP 状态码反推错误码。
+        query: "/waf/deny?code={status}"
+
+  services:
+    # 渲染端点所在服务：指向 WAF 自身，仅用于 errors 中间件回源。
+    waf-deny:
+      loadBalancer:
+        # 渲染端点是幂等只读端点，无需粘性会话（sticky）。
+        servers:
+          - url: "http://waf:9080"
+
+    # 业务后端示例（按实际环境替换）。
+    app-service:
+      loadBalancer:
+        servers:
+          - url: "http://app:8080"
+
+  routers:
+    # 业务路由：先由 errors 兜住错误响应，再进入鉴权。
+    #
+    # 中间件顺序是本文件最容易踩坑的地方，务必理解清楚：
+    #   Traefik 的后端是 alice 风格的链式包装，列表中**靠前的中间件在链的外层**
+    #   （即 New(m1, m2).Then(app) == m1(m2(app))，请求先经过 m1）。
+    #   forwardAuth 判定失败时会直接 WriteHeader 返回，**不会调用下游**；
+    #   只有把 errors 放在外层，它才能观察到 forwardAuth 写出的 403/429，
+    #   进而回源 /waf/deny 渲染 JSON 错误体。
+    #   若顺序写反（waf-auth 在前），鉴权失败产生的 403 会直接返回给客户端，
+    #   表现为「JSON 错误体丢失、只剩 Traefik 默认错误页」。
+    #
+    # 真机验收方法：故意构造一次拦截（例如 /api/user?id=1%27%20OR%20%271%27%3D%271），
+    # 断言响应体是以 {"code":"WAF_BLOCKED"...} 开头的 JSON，而不是 HTML。
+    app:
+      rule: "Host(`app.example.com`)"
+      entryPoints:
+        - web
+      middlewares:
+        - waf-errors
+        - waf-auth
+      service: app-service

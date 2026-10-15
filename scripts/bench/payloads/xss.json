@@ -1,0 +1,1 @@
+{"comment":"<script>alert(document.cookie)</script>","name":"<img src=x onerror=alert(1)>"}

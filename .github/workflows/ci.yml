@@ -1,0 +1,91 @@
+# =============================================================================
+# CI：构建、静态检查、单元测试（对应验收项 A1 / A2 / A22 / A25）
+#
+# 说明：CI 平台为 GitHub Actions。若内网使用 GitLab CI / Jenkins，
+# 请把本文件的步骤迁移过去，并保留「os/exec 静态拦截」这一步（它是需求 R18 的强制手段）。
+# =============================================================================
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          # 版本信息需要 git 历史（git describe）。
+          fetch-depth: 0
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: 校验依赖整洁性
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: 编译全部包
+        run: CGO_ENABLED=0 go build ./...
+
+      - name: 静态检查 go vet
+        run: go vet ./...
+
+      - name: 单元测试
+        run: go test ./... -race -count=1
+
+      - name: 禁止执行系统命令（需求 R18）
+        # 需求 R18 要求封禁只在 WAF 内部生效，全仓库不得出现 os/exec。
+        # 这里做一次文本级兜底检查，与 golangci-lint 的 depguard 规则形成双重保障。
+        run: |
+          if grep -rn --include='*.go' -E '"os/exec"|exec\.Command' . ; then
+            echo "::error::检测到 os/exec 使用，违反需求 R18（封禁不操作系统防火墙）"
+            exit 1
+          fi
+          echo "未检测到 os/exec 使用"
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          # 与 .golangci.yml 的 v2 配置格式保持一致。
+          version: v2.1.6
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: build-test
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 构建镜像
+        run: |
+          docker build \
+            --build-arg VERSION=ci \
+            --build-arg COMMIT="${GITHUB_SHA::7}" \
+            --build-arg BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -t waf:ci .
+
+      - name: 校验健康检查
+        run: |
+          docker run -d --name waf-ci -p 9080:9080 waf:ci
+          for i in $(seq 1 20); do
+            if docker exec waf-ci /waf healthz; then
+              echo "健康检查通过"
+              docker rm -f waf-ci
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::容器健康检查失败"
+          docker logs waf-ci
+          exit 1

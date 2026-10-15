@@ -8,3 +8,9 @@
 /coverage.txt
 /.env
 /*.env
+/reference
+/.tmp
+/dist
+/logs
+*.exe
+/.git

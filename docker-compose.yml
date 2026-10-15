@@ -1,0 +1,78 @@
+# =============================================================================
+# 本地编排示例：waf + redis（对应需求 R14 / R23 / R25）
+# =============================================================================
+#
+# 使用方式：
+#   mkdir -p configs logs
+#   cp configs/waf.example.yaml configs/waf.yaml
+#   docker compose up -d
+#
+# 说明：
+#   - redis 为共享状态存储（限速计数 + 内部封禁名单），多实例部署时多个 WAF
+#     副本共用同一个 redis 即可实现「跨实例共享」；
+#   - 若不需要多实例共享，可把 configs/waf.yaml 中的 stores[].enabled 设为 false，
+#     WAF 会自动降级为本地内存存储（多实例不共享）；
+#   - WAF 以只读根文件系统运行，仅挂载配置、日志与 /tmp（请求体落盘用）。
+
+services:
+  waf:
+    build:
+      context: .
+      args:
+        VERSION: ${WAF_VERSION:-dev}
+        COMMIT: ${WAF_COMMIT:-none}
+        BUILD_TIME: ${WAF_BUILD_TIME:-unknown}
+    image: waf:local
+    container_name: waf
+    # 只读根文件系统 + 非 root，最小化运行时被篡改的风险。
+    read_only: true
+    user: "65532:65532"
+    ports:
+      - "9080:9080"
+      - "127.0.0.1:9090:9090"
+    volumes:
+      # 配置以只读方式挂载。
+      - ./configs:/etc/waf:ro
+      # 日志目录需要可写。
+      - ./logs:/var/log/waf
+      # 请求体落盘目录（spool）使用 tmpfs，避免写入镜像层。
+      - /tmp
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    command: ["run", "--config", "/etc/waf/waf.yaml"]
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/waf", "healthz", "--config", "/etc/waf/waf.yaml"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  redis:
+    # 离线环境请改为内网镜像仓库地址。
+    image: redis:7-alpine
+    container_name: waf-redis
+    # 仅在内网暴露，不映射到宿主机端口。
+    expose:
+      - "6379"
+    # 内部存储仅用于计数与名单，关闭持久化以降低 IO 开销；
+    # 如需重启后保留封禁名单，可改为 appendonly yes 并挂载数据卷。
+    command:
+      - "redis-server"
+      - "--save"
+      - ""
+      - "--appendonly"
+      - "no"
+      - "--maxmemory"
+      - "256mb"
+      - "--maxmemory-policy"
+      - "allkeys-lru"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+    restart: unless-stopped

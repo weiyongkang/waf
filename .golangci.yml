@@ -1,0 +1,78 @@
+# =============================================================================
+# golangci-lint 配置
+#
+# 目标（对应需求 R10–R12、R18）：
+#   - 强制「不执行系统命令」：禁用 os/exec（depguard 规则）；
+#   - 强制中文详细注释：通过 revive 的 exported 规则检查导出标识符注释；
+#   - 统一命名与错误处理风格。
+#
+# 注意：本配置使用 golangci-lint v2 的配置格式（version: "2"）。
+# =============================================================================
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  # 使用默认启用的检查器集合，再按需增删。
+  default: standard
+  disable:
+    # 本项目大量使用嵌套配置结构体，字段级长度限制会带来噪音而无实际收益。
+    - exhaustruct
+  enable:
+    # 注释与文档规范（检查导出标识符是否具备注释）。
+    - revive
+    # 错误处理与命名等常见问题的补充检查。
+    - errcheck
+    - gocritic
+    - nilerr
+    - errorlint
+    # 禁止依赖 os/exec：需求 R18 要求全仓库不执行任何系统命令。
+    - depguard
+
+  settings:
+    revive:
+      rules:
+        # 导出标识符必须有注释；本项目要求注释为中文且说明「为什么」。
+        - name: exported
+          arguments:
+            - disableStutteringCheck
+        # 包注释检查：每个包都应有说明其职责的文档注释。
+        - name: package-comments
+        - name: indent-error-flow
+        - name: errorf
+        - name: context-as-argument
+
+    depguard:
+      rules:
+        # 需求 R18：封禁只在 WAF 内部生效，禁止任何系统防火墙联动所需的命令执行能力。
+        no-exec:
+          deny:
+            - pkg: "os/exec"
+              desc: "禁止执行系统命令（需求 R18：封禁不操作系统防火墙）"
+          # 仅检查项目自身代码，不限制第三方依赖的内部实现。
+          files:
+            - "$all"
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+  settings:
+    goimports:
+      # 分组顺序：标准库 / 第三方 / 本项目。
+      local-prefixes:
+        - github.com/weiyongkang/waf
+
+issues:
+  # 不限制同类问题的输出条数，避免长文件中的问题被截断。
+  max-issues-per-linter: 0
+  max-same-issues: 0

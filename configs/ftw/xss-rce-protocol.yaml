@@ -1,0 +1,90 @@
+# =============================================================================
+# go-ftw 兼容回归用例：XSS、RCE、协议攻击与良性流量
+# =============================================================================
+---
+meta:
+  author: "waf-project"
+  enabled: true
+  name: "xss-rce-protocol.yaml"
+  description: "XSS / 命令注入 / 协议攻击回归用例"
+tests:
+  - test_title: "941100-xss-query-string"
+    desc: "查询串中的 XSS 应被 941xxx 命中"
+    stages:
+      - stage:
+          input:
+            method: "GET"
+            uri: "/search?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E"
+            headers:
+              Host: "app.example.com"
+          output:
+            log_contains: 'id "941'
+            status: 403
+
+  - test_title: "941100-xss-form-body"
+    desc: "表单体中的 XSS 应被 941xxx 命中"
+    stages:
+      - stage:
+          input:
+            method: "POST"
+            uri: "/api/comment"
+            headers:
+              Host: "app.example.com"
+              Content-Type: "application/x-www-form-urlencoded"
+            data: "comment=%3Cscript%3Ealert(1)%3C%2Fscript%3E"
+          output:
+            log_contains: 'id "941'
+            status: 403
+
+  - test_title: "932160-rce-query-string"
+    desc: "查询串中的命令注入应被 932xxx 命中（CRS 的 unix-shell.data 收录的是带路径形式）"
+    stages:
+      - stage:
+          input:
+            method: "GET"
+            uri: "/api/ping?host=127.0.0.1%3B%2Fbin%2Fsh%20-c%20id"
+            headers:
+              Host: "app.example.com"
+          output:
+            log_contains: 'id "932'
+            status: 403
+
+  - test_title: "921110-protocol-attack-crlf"
+    desc: "请求行中的 CRLF 注入应被 920xxx/921xxx 协议规则命中"
+    stages:
+      - stage:
+          input:
+            method: "GET"
+            uri: "/api/item%0d%0aX-Injected:%20yes"
+            headers:
+              Host: "app.example.com"
+          output:
+            log_contains: 'id "92'
+            status: 403
+
+  - test_title: "benign-json-body"
+    desc: "良性 JSON 请求体必须放行（回归「只证明能拦、不证明不乱拦」的缺口）"
+    stages:
+      - stage:
+          input:
+            method: "POST"
+            uri: "/api/login"
+            headers:
+              Host: "app.example.com"
+              Content-Type: "application/json"
+            data: '{"username":"alice","password":"Str0ng!Pass","remember":true}'
+          output:
+            no_log_contains: 'id "94'
+            status: 200
+
+  - test_title: "benign-static-asset"
+    desc: "静态资源请求必须放行"
+    stages:
+      - stage:
+          input:
+            method: "GET"
+            uri: "/static/app.4f2a1b.css?v=20260101"
+            headers:
+              Host: "app.example.com"
+          output:
+            status: 200

@@ -1,0 +1,724 @@
+# =============================================================================
+# WAF 完整示例配置（forward-auth 前置校验 · Nginx + Traefik）
+# =============================================================================
+#
+# 使用方式：
+#   waf check-config -c configs/waf.example.yaml     # 校验并查看生效配置与来源摘要
+#   waf run          -c configs/waf.example.yaml     # 启动服务
+#
+# 配置优先级（高到低，需求 R16）：CLI > 本配置文件 > 环境变量 > 内置默认值
+#   - CLI：      --server-listen=:9081 / --set server.listen=:9081
+#   - 环境变量： WAF_SERVER_LISTEN=:9081（命名由配置路径机械推导）
+#   - 注意：本项目的优先级与 reference/honeypot 相反（honeypot 是环境变量最高），
+#           照搬 honeypot 的运维经验会导致配置不生效。
+#
+# 约定：
+#   - 所有时长写人类可读形式（300ms / 30s / 5m / 24h）；
+#   - 所有大小写字节数；
+#   - 数组类配置（pipeline / stores / notifiers / sites）只能写在配置文件里，
+#     标量项可以通过环境变量或 CLI 覆盖。
+# =============================================================================
+
+version: 1
+
+# -----------------------------------------------------------------------------
+# HTTP 服务
+# -----------------------------------------------------------------------------
+server:
+  # forward-auth 鉴权端点监听地址。
+  listen: ":9080"
+  # 指标与探针的独立监听地址，便于按网络隔离（不能与 listen 相同）。
+  metrics_listen: ":9090"
+  # 读取请求头的超时，用于抵御慢速请求攻击。
+  read_header_timeout: 3s
+  # 优雅关停的最长等待时间。
+  shutdown_timeout: 10s
+
+# -----------------------------------------------------------------------------
+# (1) 接入适配：把代理注入的头与体还原为原始请求
+# -----------------------------------------------------------------------------
+ingress:
+  # 接入类型：auto | traefik-forwardauth | nginx-openresty | nginx-auth-only
+  # auto 会依据注入头的存在性自动判定，适合多种代理共存的过渡期。
+  type: auto
+  # 鉴权子请求路径（代理侧 forwardAuth / auth_request 的目标）。
+  path: "/waf/auth"
+  # JSON 错误体渲染端点路径（Traefik errors 中间件回源使用）。
+  deny_path: "/waf/deny"
+
+  # 原始请求信息的注入头候选列表：按顺序取第一个存在的头。
+  headers:
+    uri: [X-Forwarded-Uri, X-Original-URI]
+    method: [X-Forwarded-Method, X-Original-Method]
+    host: [X-Forwarded-Host]
+    proto: [X-Forwarded-Proto]
+
+  # 客户端 IP 推导
+  client_ip:
+    order: [X-Forwarded-For, X-Real-IP]
+    # 可信代理网段：只有来源落在这些网段内，才会信任其携带的转发头。
+    # 生产环境必须收敛为实际代理地址，否则客户端可以伪造 X-Forwarded-For 绕过限速与封禁。
+    trusted_proxies: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.1/32"]
+
+  # 请求体通道（需求 R4）
+  body:
+    # required：必须携带请求体（缺失时告警）；optional：可有可无；disabled：完全不读。
+    mode: required
+    # 请求体来源通道：request-body（随鉴权子请求送达）
+    source: request-body
+    # 无 PhaseBody 插件时不读取请求体（零拷贝、零开销）。
+    lazy: true
+    # 单次请求可读取的请求体上限；必须与代理侧 maxBodySize 保持同量级。
+    max_bytes: 1048576
+    # 流式读取的单块大小；禁止一次性读入整个请求体（需求 R13）。
+    chunk_bytes: 32768
+    # 超限策略：truncate（截断继续检测）| reject（直接 400）| skip（跳过体检测）
+    on_exceed: truncate
+    # 缓冲位置：memory | disk | auto（按 memory_threshold 自动选择）
+    spool: auto
+    memory_threshold: 65536
+    # 落盘目录；留空使用系统临时目录。
+    spool_dir: ""
+    read_timeout: 2s
+    # 预期必须携带请求体的方法（仅在 mode: required 时生效）。
+    #
+    # 只有这些方法缺少请求体才会被计为「请求体缺失」（系统日志告警 + waf_body_missing_total）。
+    # GET / HEAD / OPTIONS / DELETE 本来就不带请求体，如果把无体一律当成异常，
+    # 日志与指标会被正常流量刷屏，真正的问题（代理没转发请求体）反而看不见。
+    missing_methods: [POST, PUT, PATCH]
+
+    # 压缩请求体解压（P1-5）
+    #
+    # 为什么必须有这个能力：代理会把 Content-Encoding: gzip 的请求体原样转交给 WAF，
+    # 不解压就等于「请求体内容对检测引擎完全不可见」——攻击者只要加一个压缩头
+    # 就能绕过全部请求体检测（需求 R4）。
+    decompress:
+      # 默认关闭（需求 R5：全部功能配置启用）。关闭时压缩体不参与检测，启动日志会提示。
+      enabled: false
+      # 允许解压的编码：gzip | deflate。
+      # br（brotli）需要第三方依赖，与本项目「无额外依赖」的交付约束冲突，
+      # 因此配置里写 br 会在校验阶段直接报错；实际收到 br 请求时按 unsupported_action 处理。
+      encodings: [gzip, deflate]
+      # 解压后请求体上限（字节）。必须单独设置：压缩比可以极大（zip bomb），
+      # 只限制压缩体大小无法阻止解压阶段耗尽内存（需求 R13）。
+      # 超过上限一律拒绝、不做截断——截断后的明文会产生「检测过了但没检出」的假象。
+      max_bytes: 4194304
+      # 遇到未启用 / 不支持的编码时的动作：
+      #   block（默认，失败关闭）：返回 400，宁可拒绝也不检测不可见的内容；
+      #   pass：放过该请求体但不检测，同时打 WARN 级系统日志留痕。
+      unsupported_action: block
+
+# -----------------------------------------------------------------------------
+# (2) 拦截响应：统一 JSON 错误体，不提供拦截页面（需求 R20）
+# -----------------------------------------------------------------------------
+responder:
+  type: json
+  # 是否在错误体中暴露 rule_id / check / score。
+  # 默认 false：不向攻击者泄露检测细节。
+  include_details: false
+  messages:
+    WAF_BLOCKED: "请求被安全策略拦截"
+    WAF_RATE_LIMITED: "请求过于频繁，请稍后再试"
+    WAF_UNAUTHORIZED: "需要身份认证"
+    WAF_BAD_REQUEST: "请求不符合安全要求"
+    WAF_UNAVAILABLE: "安全检测服务暂时不可用"
+
+# -----------------------------------------------------------------------------
+# (3) 检测引擎（Coraza + CRS）；enabled=false 时退化为纯前置访问控制
+# -----------------------------------------------------------------------------
+engine:
+  enabled: true
+  # on：正常拦截；detection_only：旁路观察（只记录不拦截，用于压误报）
+  mode: on
+  # CRS 偏执等级 1-4：等级越高检出率与误报率同时上升。
+  # 上线路径建议：1 -> detection_only 观察压误报 -> on。
+  paranoia_level: 1
+  # 入站异常评分阈值（CRS 默认 5）。同一个数字用于两处，避免出现
+  # 「引擎认为该拦、WAF 却不拦」的割裂：
+  #   1. 注入 SecAction 覆盖 CRS 的 tx.inbound_anomaly_score_threshold（规则集的阻断判定）；
+  #   2. 作为 pipeline 中 threshold 单元未显式配置时的缺省阈值；
+  #   3. detection_only 模式下判定「本应拦截」的基准。
+  anomaly_score_threshold: 5
+  rules:
+    # 主规则目录：留空 = 使用编译期嵌入的 CRS 规则集（离线打包，无需外部文件）。
+    # 填写目录时完全改用磁盘规则；多个目录按声明顺序加载。
+    dirs: []
+    # 追加的自定义规则目录：排在主规则集之后加载，可用
+    # SecRuleRemoveById / SecRuleUpdateTargetById 等指令对主规则做修正（压误报）。
+    custom_dirs: []
+    # 目录内的文件匹配模式
+    include: ["*.conf"]
+    # 「规则引用的数据文件」匹配模式（例如 @pmFromFile unix-shell.data 依赖的数据文件）。
+    # 必须单独配置：这些文件不是规则文件，按 Include 载入会解析报错。
+    data_include: ["*.data"]
+    # CRS 设置文件名（相对规则根）；留空表示不使用设置文件
+    crs_setup: crs-setup.conf
+  inline_directives:
+    - "SecRequestBodyAccess On"
+  body:
+    access: true
+    # 引擎侧请求体上限（对应 SecRequestBodyLimit）
+    limit_bytes: 13107200
+    # 超过该值后请求体落盘（对应 SecRequestBodyInMemoryLimit）
+    in_memory_limit_bytes: 131072
+    limit_action: reject
+    json_depth_limit: 4096
+    # multipart 解析属于 M2 能力，默认关闭
+    parse_multipart: false
+    # 请求体处理器路由：把 Content-Type 映射到引擎的请求体解析器。
+    #
+    # 为什么必须配置：引擎只按 Content-Type 自动识别
+    # application/x-www-form-urlencoded 与 multipart/form-data；JSON 与 XML
+    # 若不在此显式指定，会被当作 URLENCODED 解析，请求体里的攻击载荷无法被规则检出。
+    # 每项生成一条 phase 1 的 ctl:requestBodyProcessor 规则，规则 ID 从 900200 起分配。
+    # 显式写 processors: [] 表示关闭全部路由（即不做 JSON / XML 体解析）。
+    processors:
+      - name: JSON
+        enabled: true
+        content_types:
+          - '^application/(?:[^;,\s]+\+)?json(?:\s*;.*)?$'
+      - name: XML
+        enabled: true
+        content_types:
+          - '^(?:application|text)/(?:[^;,\s]+\+)?xml(?:\s*;.*)?$'
+  # 规则热加载：规则文件变化后原子替换检测引擎，失败保留旧引擎继续服务。
+  hot_reload:
+    enabled: true
+    # 去抖动：指纹变化后再等一个周期复核，避免打包/解包过程中「边写边改」触发多次重载。
+    debounce: 1s
+    # 指纹轮询间隔。为什么用轮询而不是 inotify：
+    #   - 交付物是静态单二进制，引入 fsnotify 会增加依赖面（需求 R10 / R14）；
+    #   - 轮询在挂载卷 / 网络文件系统 / 容器 overlay 下行为一致；
+    #   - 指纹只做 stat（不读文件内容），几十个规则文件的代价可忽略（需求 R13）。
+    poll_interval: 5s
+    # 手动触发重载的标记文件：`waf rules reload` 会更新其时间戳，实例据此立即重载。
+    # 留空表示只能靠规则目录变化触发（无法主动重载）。
+    marker_file: ""
+
+  # 误报例外（P1-4）：在**不修改规则集**的前提下把已确认的误报放行，
+  # 并且每条例外都必须留下 name 与 reason，便于审计复盘。
+  #
+  # 两类作用的实现机制完全不同（顺序要求相反，写错会「配了但不生效」）：
+  #   全局例外（url_pattern 与 methods 均为空）
+  #       生成 SecRuleRemoveById / SecRuleRemoveByTag / SecRuleUpdateTargetById，
+  #       必须排在规则文件**之后**（只对已解析出来的规则生效）。
+  #   作用域例外（指定了 url_pattern 和/或 methods）
+  #       生成 phase:1 的 ctl 规则（ctl:ruleRemoveById / ruleRemoveByTag /
+  #       ruleRemoveTargetById），必须排在规则文件**之前**。
+  # 顺序由编译器与引擎装配保证，运维只需描述「在哪个 URL 上放行哪条规则」。
+  #
+  # 注意 enabled 的默认值：不写 enabled 即为 false（例外默认不生效）。
+  # 这是刻意的安全默认——例外等于关闭部分防护，必须显式打开。
+  exceptions:
+    # 全局例外示例：某条规则在本业务里确认是误报，整体关闭。
+    - name: "全局放行 942100（示例，默认关闭）"
+      enabled: false
+      reason: "业务参数里存在形如 ' OR '1'='1 的合法内容，经 XX 复核确认为误报（工单 #1234）"
+      rule_ids: ["942100"]
+    # 作用域例外示例：只在特定 URL + 方法上放行某些规则。
+    - name: "登录接口放行 XSS 规则（示例，默认关闭）"
+      enabled: false
+      reason: "登录页富文本字段由前端过滤，经复核确认无风险"
+      rule_ids: ["941100", "941110"]
+      # 从检测目标中摘除变量（比整条移除规则更精细），必须配合 rule_ids 使用。
+      targets: ["ARGS:comment"]
+      # URL 正则（对 REQUEST_URI 求值，含查询串）；不做自动锚定，需要精确匹配请自行写 ^...$
+      url_pattern: "^/api/login$"
+      methods: ["POST"]
+      # 过期时间（RFC3339）：用于「临时放行」，到期自动失效，无需人工记得删除。
+      # 留空表示永不过期。
+      expires_at: ""
+
+# -----------------------------------------------------------------------------
+# (4) 站点策略（多站点差异化；当前阶段单站点即可满足）
+# -----------------------------------------------------------------------------
+sites:
+  # 匹配优先级：精确 Host > 最长通配后缀（*.example.com）> hosts: ["*"] > 内置默认站点。
+  # Host 会被规范化：忽略端口、大小写与结尾点（app.example.com:8443 -> app.example.com）。
+  - name: default
+    # 兜底站点：未命中任何精确 / 通配模式的 Host 回落到这里。
+    # 注意：hosts 中出现 "*" 时不能再写其它模式，且全部站点中最多只有一个 "*"。
+    hosts: ["*"]
+    # inherit：继承全局 engine.mode；detection_only：本站点只观察不拦截；on：本站点强制拦截
+    engine_mode: inherit
+    # 站点级校验链名（多链灰度预留；当前阶段各站点共用全局 pipeline）
+    pipeline: default
+    # 站点级参数覆盖：键名为「插件类型.参数名」，对本站点内所有同类型插件实例生效，
+    # 优先级高于实例 settings。当前已支持的键见下文「限速」示例。
+    # params:
+    #   ratelimit.limit: "300"
+    #   ratelimit.burst: "30"
+    #   ratelimit.window: "60s"
+
+  # 示例：为特定域名单独收紧限速（去掉注释即可生效；与上面的 default 站点并存）
+  # - name: shop
+  #   hosts: ["shop.example.com", "*.shop.example.com"]
+  #   engine_mode: inherit
+  #   pipeline: default
+  #   params:
+  #     # 敏感站点：阈值收紧到 60 次/分钟
+  #     ratelimit.limit: "60"
+  #     ratelimit.burst: "10"
+  #     ratelimit.window: "60s"
+
+# -----------------------------------------------------------------------------
+# (5) 校验链：有序数组 = 串联顺序；enabled 控制单个实例启停；同类型可多实例
+#     执行顺序：先按 phase（pre -> request -> body -> post），同 phase 内按 order 升序
+# -----------------------------------------------------------------------------
+pipeline:
+  # 说明：本文件是「目标拓扑」的完整参考，因此保留了全部插件的声明。
+  #       enabled: false 的实例不会进入注册表查找，也不会产生任何运行期开销；
+  #       未注册的类型若 enabled: true，会让 `waf run` 在启动阶段直接失败
+  #       （fail fast 是刻意设计：「配置里写了防护、实际没生效」比启动失败更危险）。
+  #       当前进度：banlist / ipaccess / ratelimit / threshold / autoban 已交付（M1.3），
+  #                 coraza（检测引擎）已交付（M1.5），下方 crs-header / crs-body 可启用。
+  #       coraza 必须拆成「请求头实例 + 请求体实例」两个实例：只有存在启用的
+  #       body 阶段实例时，运行期才会真正读取请求体（按需读体，需求 R13）。
+
+  # --- pre 阶段：纯元数据判断，代价最低，排在链首 ---
+  - name: ban-list
+    type: banlist
+    enabled: true
+    order: 5
+    phase: pre
+    on_error: pass
+    settings:
+      # 命中封禁名单后的动作：block（拦截）| observe（只记录）
+      action: block
+      # 命中时累加的异常评分（供 threshold 单元聚合判定）
+      score: 5
+      # 单次名单查询超时；存储抖动时宁可查询失败（按 on_error 处理）也不拖慢请求
+      store_timeout: 200ms
+
+  - name: ip-allow
+    type: ipaccess
+    enabled: false
+    order: 10
+    phase: pre
+    on_error: pass
+    settings:
+      allowlist: ["192.168.0.0/16"]
+      blocklist: []
+      blocklist_file: ""
+      action: block
+      score: 0
+
+  - name: rl-ip
+    type: ratelimit
+    enabled: true
+    order: 20
+    phase: pre
+    on_error: pass
+    settings:
+      dimensions: [ip]
+      window: 60s
+      limit: 600
+      burst: 60
+      action: ratelimit
+      store: default
+      store_timeout: 200ms
+      # 触发限速时是否同时请求内部封禁（默认关闭：避免一次流量高峰封掉整段 NAT 出口）
+      ban: false
+
+  - name: rl-login
+    type: ratelimit
+    enabled: false
+    order: 21
+    phase: pre
+    on_error: pass
+    settings:
+      dimensions: [ip, path]
+      path_match: ["^/login$", "^/api/auth/"]
+      window: 300s
+      limit: 20
+      burst: 0
+      action: block
+      score: 0
+      store: default
+      store_timeout: 200ms
+      ban: true
+      ban_ttl: 15m
+
+  # --- request 阶段：只看请求行与请求头 ---
+  - name: crs-header
+    type: coraza
+    enabled: true
+    order: 30
+    phase: request
+    on_error: block
+    settings:
+      # 请求头实例不读请求体：即便请求携带请求体，也只在实例级关闭（全局仍可按需读体）
+      process_body: false
+      # 异常评分写入的状态键；threshold 单元的 score_key 需与此一致
+      score_key: inbound_anomaly_score
+      # 单次请求最多记录的命中明细条数（防止日志放大）
+      max_findings: 16
+      # 可选项（未配置即继承全局 engine 配置）：
+      # mode: detection_only      本实例只观察不拦截
+      # paranoia_level: 2         本实例使用更高的偏执等级
+      # inline_directives: [...]  本实例追加的 SecLang 指令
+      # rule_dirs: ["/etc/waf/rules"]  本实例改用磁盘规则集
+      # custom_rule_dirs: ["/etc/waf/custom-rules"]
+      # body_limit_bytes / body_in_memory_limit_bytes / body_access / parse_multipart
+
+  # --- body 阶段：只有存在启用的该阶段插件时，运行时才会读取请求体 ---
+  - name: crs-body
+    type: coraza
+    enabled: true
+    order: 31
+    phase: body
+    on_error: block
+    settings:
+      # 请求体实例必须显式声明 process_body: true（配置校验会检查阶段一致性）
+      process_body: true
+      score_key: inbound_anomaly_score
+      max_findings: 16
+
+  # --- post 阶段：评分聚合与封禁落地 ---
+  - name: threshold
+    type: threshold
+    enabled: true
+    order: 40
+    phase: post
+    settings:
+      # 评分所在状态键：anomaly_score 是执行器统一汇总键；
+      # 检测引擎（M1.5）会按 inbound_anomaly_score 自行写入，两者取较大值避免重复计分。
+      score_key: anomaly_score
+      inbound_threshold: 5
+      action: block
+      # 只有存在 high 及以上命中时才允许仅凭评分拦截，避免低危命中凑分误伤
+      min_severity: ""
+
+  - name: autoban
+    type: autoban
+    enabled: true
+    order: 90
+    phase: post
+    settings:
+      # 计入触发条件的链结论（block / ratelimit / observe ...）；any 表示任何终态结论
+      trigger_on: [block, ratelimit]
+      # 最低命中严重度门槛（info / low / medium / high / critical；留空表示不设门槛）。
+      # 为什么需要它：命中次数衡量的是「量」，严重度衡量的是「质」；
+      # 不设门槛时，来源只要把低危规则刷够次数就会被封，误伤概率远大于收益。
+      min_severity: medium
+      # 触发维度：可配置多个，任一维度达标即产出封禁动作（多个维度同时达标则一并封禁）。
+      #
+      # 为什么需要「维度」而不是固定按 IP：
+      #   只按 IP 封禁时，「同一来源集中打某一个接口」与「整片 NAT 出口被牵连」
+      #   无法区分；引入维度后可以做到「只封这个人访问这个接口」，止损精准得多。
+      #
+      # 注意事项：每个 scope 必须同时出现在 ban.ban_keys 中，
+      # 否则「封禁写进去了、却没有请求会去查它」——配置校验与启动阶段都会直接报错。
+      # 留空 dimensions 等价于单一的 client_ip 维度（旧配置行为不变）。
+      dimensions:
+        # 维度一：按客户端 IP 累计（最通用；阈值高一些，避免误伤 NAT 出口）
+        - scope: client_ip
+          threshold: 3
+          window: 5m
+          # 留空则使用 ban.default_ttl
+          ttl: ""
+        # 维度二：按「客户端 IP + 请求路径」累计（只封这个人访问这个接口）
+        - scope: client_ip+path
+          # 同一路径的针对性攻击（遍历 / 撞库 / 注入探测）更值得快速封禁
+          threshold: 5
+          window: 10m
+          ttl: 30m
+      store: default
+      # ban（写入名单）| observe（只记录与告警，灰度验证阈值是否合理）
+      action: ban
+      # 来源已被封禁时是否跳过计数与重复写名单（默认 true）。
+      # 置 false 表示「持续攻击就持续续期」，配合 ban.escalate 时封禁时长会不断加长。
+      skip_when_banned: true
+      # 触发时是否产生告警事件（由后续里程碑的告警通道外送）
+      alert: true
+# -----------------------------------------------------------------------------
+# (6) 共享状态存储：限速计数 + 内部封禁名单（多实例共享，需求 R17 / R23 / R25）
+#     启用规则：enabled=false 时不连接 Redis，直接使用 fallback 指定的本地实现
+#               （仅本实例生效，多实例不共享），并以 warn 级写系统日志。
+# -----------------------------------------------------------------------------
+# stores:
+#   - name: default
+#     # redis（多实例共享）| memory（本地内存）| file（单机持久化，不用于共享）
+#     type: redis
+#     enabled: true
+#     # Redis 未启用或降级时使用的本地实现
+#     fallback: memory
+#     # 运行期故障策略：fail_open（放过，可用性优先）| fail_closed（拦截，安全优先）
+#     #                 | fallback_local（降级为本地存储，默认）
+#     on_error: fallback_local
+#     settings:
+#       # ---------------------------------------------------------------------
+#       # 拓扑：standalone（单机）| sentinel（哨兵）| cluster（集群）
+#       #
+#       # 三种拓扑都同时支持「Docker 容器化部署」与「直接部署（裸机/虚拟机）」，
+#       # 差异只体现在地址与拓扑参数上，切换拓扑不需要修改任何代码（需求 R25）。
+#       # ---------------------------------------------------------------------
+#       topology: standalone
+
+#       # 地址列表：
+#       #   standalone -> 取第一个元素；
+#       #   sentinel   -> 填写全部哨兵地址；
+#       #   cluster    -> 填写全部种子节点（至少一个，建议 3 个以上）。
+#       addrs:
+#         - "redis:6379"
+
+#       # Redis 6+ ACL 用户名；未启用 ACL 时留空。
+#       username: ""
+#       password: ""
+#       # cluster 拓扑下必须为 0。
+#       db: 0
+#       # sentinel 拓扑必填：主节点名称（即 sentinel monitor 配置中的名字）。
+#       master_name: ""
+#       # sentinel 拓扑可选：哨兵自身的认证密码。
+#       sentinel_password: ""
+
+#       # 键前缀：同一 Redis 被多个环境共用时，用前缀隔离。
+#       prefix: "waf:"
+
+#       # 连接池与超时
+#       pool_size: 64
+#       min_idle_conns: 4
+#       dial_timeout: 500ms
+#       read_timeout: 300ms
+#       write_timeout: 300ms
+#       max_retries: 2
+
+#       # 链路加密（内网需要时开启）
+#       tls:
+#         enabled: false
+#         ca_file: ""
+#         cert_file: ""
+#         key_file: ""
+#         insecure_skip_verify: false
+
+#       # 本地「已封禁」结论缓存：降低每次请求的 Redis 往返。
+#       # 注意：限速计数不做本地缓存（必须强一致），仅封禁结论做缓存。
+#       # 需要封禁即时生效时把该值设为 0s（代价是每次请求多一次 Redis 往返）。
+#       local_cache_ttl: 5s
+#       local_cache_entries: 100000
+
+# 无 Redis 的单机场景：直接使用本地内存存储（多实例不共享）
+stores:
+  - name: default
+    type: memory
+    enabled: true
+    settings:
+      shards: 64
+      max_entries: 1000000
+
+# -----------------------------------------------------------------------------
+# (7) 封禁策略：仅在本 WAF 内部生效，不执行任何系统防火墙操作（需求 R18 / R19）
+# -----------------------------------------------------------------------------
+ban:
+  # 默认封禁时长：30m 是「足够劝退扫描器/爆破脚本」与「避免办公网 NAT 出口误封」的平衡点。
+  default_ttl: 30m
+  # 封禁时长上限，防止误配置导致长期封禁。
+  max_ttl: 24h
+  # 主封禁键维度：client_ip（按 IP）| client_ip+site（按「IP + 站点」，多站点隔离）
+  #                 | client_ip+path（按「IP + 路径」）| client_ip+method（按「IP + 方法」）
+  # 主维度决定两件事：`waf ban add/remove` 写入时使用的维度、启动日志与名单表头的展示口径。
+  ban_key: client_ip
+  # 运行期生效的封禁维度集合（可配置多个）：banlist 会按此顺序逐个查询，命中任一维度即拦截。
+  #
+  # 为什么需要它：autoban 可以按多个维度写入封禁（见 pipeline 中 autoban 的 dimensions），
+  #   banlist 必须把「可能被写入的全部维度」都查一遍，否则会出现「封了却没有生效」。
+  #
+  # 约定：必须包含 ban_key（否则运维命令写入的名单永远不会被查询到，配置校验会直接报错）。
+  # 注意：数组无法通过环境变量 / CLI 表达，因此该项只支持配置文件通道。
+  # 留空（或整项删除）等价于只启用 ban_key 一个维度。
+  ban_keys: [client_ip, client_ip+path]
+  # 累进封禁：同一来源在 escalate_window 内重复命中时按时长阶梯递增。
+  escalate: false
+  escalate_steps: [30m, 2h, 24h]
+  escalate_window: 24h
+
+# -----------------------------------------------------------------------------
+# (8) 告警外送（并联，可配置多个通道；任一通道失败不影响判定结果）
+# -----------------------------------------------------------------------------
+# 告警外送的公共策略。
+#
+# 为什么这些参数是"全局的"：它们描述的是"外送这件事本身"的行为
+#（异步程度、失败重试、聚合口径、级别门槛），把公共行为复制到每个通道
+# 会让"为什么这个通道没发出去"变成需要逐通道排查的问题。
+notify:
+  # 总开关。false 时完全不构造任何通道（零开销）；
+  # 此时即使 notifiers 中写了 enabled: true 也不会生效，启动日志会给出明确提示。
+  enabled: false
+  # 告警队列长度（条）。队列把"产生告警"与"送达告警"解耦，
+  # 使请求判定路径永远不会等待外部系统；队列满时按"丢弃并计数"处理
+  # （指标 waf_alert_total{result="dropped"}），宁可丢告警也不阻塞 WAF。
+  queue_size: 1024
+  # 并发外送协程数。大于 1 时同一通道可能被并发调用，
+  # 因此通道实现必须并发安全（本项目全部通道实现均满足）。
+  workers: 2
+  # 单次送达超时。没有超时的外送会让协程永久卡在不可达的外部系统上。
+  timeout: 5s
+  # 全局最低告警级别：info / warn / error，低于该级别的告警不发送。
+  # 默认 warn 是因为 info 级（观察模式命中）在试运行阶段量级极大，
+  # 默认全发会立刻把通道打爆，反而让真正的告警被忽略。
+  min_level: warn
+  # 聚合抑制窗口：同一"聚合键"的告警在窗口内只发送一次。
+  # 聚合键 = 级别 + 站点 + 标题 + 命中规则。
+  # 设为 0 表示不抑制（此时抑制表完全不参与工作，零内存开销）。
+  suppress_window: 5m
+  # 单条告警的最大外送尝试次数（含首次）与两次尝试之间的固定间隔。
+  max_attempts: 3
+  retry_backoff: 2s
+  # 每个通道抑制表的键上限（内存上限，需求 R13）。
+  # 达到上限后按"最早写入"淘汰；设为 0 表示不设上限（改用周期性过期清理）。
+  max_tracked_keys: 10000
+
+# 告警通道：并联扇出——一条告警会送给**全部** enabled: true 的通道，
+# 任一通道失败不影响其它通道，也不影响请求判定。
+# 全部通道默认关闭（需求 R5：功能即开关）。
+notifiers: []
+# 四种通道的完整示例（把上面的 notifiers: [] 换成下面的内容即可启用）：
+#
+# notifiers:
+#   # 1) 通用 HTTP：接自建告警网关 / Alertmanager webhook / SIEM HTTP 收集接口
+#   - name: gateway
+#     type: webhook
+#     enabled: true
+#     min_level: warn          # 覆盖 notify.min_level；留空表示继承
+#     suppress_window: 10m     # 覆盖 notify.suppress_window；0 表示继承
+#     settings:
+#       url: "https://alerts.example.com/waf"
+#       method: POST           # POST（默认）/ PUT
+#       headers:
+#         Authorization: "Bearer <TOKEN>"
+#       content_type: application/json
+#       insecure_tls: false    # 仅自签名证书的内网环境才设为 true
+#       timeout: 5s
+#       max_response_bytes: 65536
+#
+#   # 2) 企业微信群机器人：注意 HTTP 200 仍可能业务失败（errcode != 0），已做判定
+#   - name: ops-wechat
+#     type: wechat
+#     enabled: true
+#     min_level: warn
+#     settings:
+#       url: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=<KEY>"
+#       format: markdown       # markdown（默认）/ text
+#       timeout: 5s
+#
+#   # 3) syslog：复用已有日志平台；仅类 Unix 平台支持（Windows 上构造会明确报错）
+#   - name: siem-syslog
+#     type: syslog
+#     enabled: false
+#     settings:
+#       network: tcp           # udp / tcp / unixgram / unix；留空表示本机 /dev/log
+#       address: "10.0.0.20:514"
+#       tag: waf
+#       facility: local0
+#       format: json           # summary（默认）/ json（推荐给 SIEM）
+#       timeout: 3s
+#
+#   # 4) 邮件：低时效、高留存，建议只承接 error 级
+#   - name: oncall-mail
+#     type: smtp
+#     enabled: false
+#     min_level: error
+#     settings:
+#       host: smtp.example.com
+#       port: 587
+#       username: waf@example.com
+#       password: "<PASSWORD>"
+#       from: waf@example.com
+#       to: ["oncall@example.com", "secops@example.com"]
+#       subject_prefix: "[WAF]"
+#       tls: starttls           # none / starttls（默认）/ tls
+#       insecure_tls: false
+#       timeout: 10s
+# -----------------------------------------------------------------------------
+# (9) 日志：两类、分级、JSON（需求 R21）
+#     system = 系统运行日志；access = 请求访问与拦截日志
+# -----------------------------------------------------------------------------
+logging:
+  system:
+    enabled: true
+    # debug | info | warn | error
+    level: info
+    # 当前仅支持 json
+    format: json
+    # stdout | file（可同时开启）
+    outputs: [stdout, file]
+    dir: logs
+    file: waf-system
+    # daily | size | both
+    rotate: daily
+    max_file_bytes: 134217728
+    keep_days: 30
+    max_total_bytes: 0
+    compress: false
+
+  access:
+    enabled: true
+    # 访问日志通道级别：debug | info | warn | error，默认 info。
+    # 注意：level 只决定「能写出哪些等级的记录」，放行记录的开闭由 allow_level 控制。
+    level: info
+    # 放行请求的记录策略（allow_level）：info | debug | off，默认 info。
+    # info  —— 鉴权请求无论「过」（放行）还是「不过」（拦截）都写入访问日志，便于排障与统计；
+    # debug —— 仅在把上面的 level 调到 debug 时才能看到放行记录（只在临时排障时使用）；
+    # off   —— 完全不记录放行，只保留拦截 / 观察 / 异常记录（高频链路节省日志体积时使用）。
+    allow_level: info
+    format: json
+    outputs: [file]
+    dir: logs
+    file: waf-access
+    rotate: daily
+    max_file_bytes: 134217728
+    keep_days: 90
+    max_total_bytes: 0
+    compress: false
+    # 是否记录请求头（默认关闭，避免泄露敏感信息）
+    include_headers: false
+    # 是否记录请求体内容（默认关闭，仅记录体元信息）
+    include_body: false
+    max_body_snippet_bytes: 4096
+    # 是否对日志中的客户端 IP 做掩码
+    mask_ip: false
+    # 需要脱敏的请求头
+    redact: [Cookie, Authorization, Proxy-Authorization, Set-Cookie, X-Api-Key, X-Auth-Token]
+
+# -----------------------------------------------------------------------------
+# 指标（Prometheus 文本暴露格式，需求 R6 / R13）
+# -----------------------------------------------------------------------------
+metrics:
+  # 关闭后：不注册任何采集器、不注册指标路由、写入器退化为空实现（零开销）。
+  enabled: true
+  # 全部指标名的统一前缀，最终形如 waf_requests_total。
+  # 同一套 Prometheus 上同时抓取灰度与生产实例时，用前缀区分来源。
+  namespace: waf
+  # 指标暴露路径，同时注册在 metrics_listen 与主监听上。
+  # 不能与 ingress.path / ingress.deny_path / /healthz / /readyz / /version 冲突。
+  path: "/metrics"
+
+# -----------------------------------------------------------------------------
+# (10) 资源与容量限额（禁止硬编码，全部可配置，需求 R13）
+#      任何一项改为 0 或负数都会使限额静默失效，因此配置校验会直接报错。
+# -----------------------------------------------------------------------------
+limits:
+  # 单个规则文件大小上限：超出直接拒绝加载该文件
+  max_rule_file_bytes: 2097152
+  # 规则总量上限
+  max_rules_total_bytes: 67108864
+  # 单个待检测 token 的大小上限
+  max_scan_token_bytes: 1048576
+  # 威胁情报文件大小上限
+  max_intel_file_bytes: 67108864
+  # GeoIP 数据库文件大小上限
+  max_mmdb_bytes: 268435456
+  # 单个配置文件大小上限
+  max_config_file_bytes: 1048576
+  # 请求头总大小上限
+  max_header_bytes: 1048576
+
+# -----------------------------------------------------------------------------
+# (11) 本地缓存
+# -----------------------------------------------------------------------------
+cache:
+  enabled: true
+  rule_cache_entries: 10000
+  ban_cache_entries: 100000
+  max_bytes: 33554432
+  ttl: 5m

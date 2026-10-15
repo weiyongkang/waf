@@ -1,0 +1,79 @@
+# =============================================================================
+# go-ftw 兼容回归用例：SQL 注入（942xxx）
+# =============================================================================
+#
+# 格式说明（与 go-ftw 的用例结构对齐，见 https://github.com/coreruleset/go-ftw）：
+#
+#   meta   描述用例集的作者、名称与启用状态；
+#   tests  是若干测试；
+#   stage  是一次请求与期望输出，input 描述请求，output 描述期望。
+#
+# 本项目的离线执行器为 test/ftw/ftw_test.go（不需要启动服务、不需要网络），
+# 因此用例可以直接编入 CI 回归门禁（对应 docs/development-roadmap.md 的门禁 G2）。
+#
+# 与 go-ftw 原始格式的差异（刻意保留的最小集）：
+#   - 只支持项目实际需要的断言：log_contains / no_log_contains / status；
+#   - input 使用 method / uri / headers / data 四个字段，不支持端口与目的地址
+#     （本项目的校验是进程内调用，不存在网络目的地）。
+---
+meta:
+  author: "waf-project"
+  enabled: true
+  name: "sql-injection.yaml"
+  description: "SQL 注入检测回归用例（CRS 942xxx）"
+tests:
+  - test_title: "942100-query-string"
+    desc: "查询串中的 SQL 注入应被 942100 命中"
+    stages:
+      - stage:
+          input:
+            method: "GET"
+            uri: "/api/user?id=1%27%20OR%20%271%27%3D%271"
+            headers:
+              Host: "app.example.com"
+          output:
+            log_contains: 'id "942100"'
+            status: 403
+
+  - test_title: "942100-json-body"
+    desc: "JSON 请求体中的 SQL 注入应被 942100 命中（请求体处理器路由生效的前提）"
+    stages:
+      - stage:
+          input:
+            method: "POST"
+            uri: "/api/login"
+            headers:
+              Host: "app.example.com"
+              Content-Type: "application/json"
+            data: '{"username":"admin","password":"1'' OR ''1''=''1"}'
+          output:
+            log_contains: 'id "942100"'
+            status: 403
+
+  - test_title: "942100-form-body"
+    desc: "表单请求体中的 SQL 注入应被 942100 命中"
+    stages:
+      - stage:
+          input:
+            method: "POST"
+            uri: "/api/login"
+            headers:
+              Host: "app.example.com"
+              Content-Type: "application/x-www-form-urlencoded"
+            data: "username=admin&password=1%27%20OR%20%271%27%3D%271"
+          output:
+            log_contains: 'id "942100"'
+            status: 403
+
+  - test_title: "benign-query-string"
+    desc: "普通查询串不应被拦截（防止规则过宽导致误报）"
+    stages:
+      - stage:
+          input:
+            method: "GET"
+            uri: "/api/user?id=42&name=alice"
+            headers:
+              Host: "app.example.com"
+          output:
+            no_log_contains: 'id "942'
+            status: 200
