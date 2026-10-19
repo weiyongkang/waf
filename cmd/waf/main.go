@@ -4,6 +4,7 @@
 //
 //	waf run          启动 forward-auth 服务（默认命令）
 //	waf check-config 仅加载并校验配置，输出生效配置与来源摘要
+//	waf config print 输出默认或叠加后的生效配置
 //	waf version      输出版本、提交号与构建时间
 //	waf healthz      供容器 HEALTHCHECK 调用的本地存活探测
 //	waf ban          封禁名单运维（读写共享存储）
@@ -39,10 +40,12 @@ const (
 const (
 	cmdRun         = "run"
 	cmdCheckConfig = "check-config"
+	cmdConfig      = "config"
 	cmdVersion     = "version"
 	cmdHealthz     = "healthz"
 	cmdBan         = "ban"
 	cmdRules       = "rules"
+	cmdDB          = "db"
 	cmdReport      = "report"
 	cmdHelp        = "help"
 )
@@ -63,6 +66,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runVersion(stdout)
 	case cmdCheckConfig:
 		return runCheckConfig(rest, stdout, stderr)
+	case cmdConfig:
+		return runConfig(rest, stdout, stderr)
 	case cmdRun:
 		return runServe(rest, stdout, stderr)
 	case cmdHealthz:
@@ -71,6 +76,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runBan(rest, stdout, stderr)
 	case cmdRules:
 		return runRules(rest, stdout, stderr)
+	case cmdDB:
+		return runDB(rest, stdout, stderr)
 	case cmdReport:
 		return runReport(rest, stdout, stderr)
 	case cmdHelp, "-h", "--help":
@@ -107,16 +114,19 @@ func printUsage(w io.Writer) {
 命令：
   run            启动 forward-auth 鉴权服务（默认命令）
   check-config   加载并校验配置，输出生效配置与来源摘要
+  config        配置工具（print：输出默认或叠加后的生效配置）
   version        输出版本、提交号与构建时间
   healthz        探测本地 /healthz（供容器 HEALTHCHECK 使用）
   ban            封禁名单运维（list / add / remove）
   rules          规则包运维（list / verify / manifest / install / rollback / reload）
+  db             运行期数据库运维（status / import-config）
   report         审计与报表（detection：DetectionOnly 试运行「若拦截」清单）
   help           显示本帮助
 
 通用参数：
-  -c, -config <路径>   配置文件路径，可多次指定（后者覆盖前者）
-                      未指定时若 /etc/waf/waf.yaml 存在则自动加载
+  -c, -config <路径>   配置文件或目录，可多次指定（后者覆盖前者）
+                       目录内按文件名字典序加载 .yaml/.yml/.json，并启用热重载
+                       未指定时若 /etc/waf/waf.yaml 存在则自动加载
   -set <路径>=<值>     按配置路径覆盖任意标量配置项，可多次指定
 
 配置优先级（高到低）：CLI > 配置文件 > 环境变量 > 内置默认值

@@ -30,6 +30,10 @@ type EngineSettings struct {
 	CRSSetup string
 	// InlineDirectives 是追加的 SecLang 指令，位于引擎基础设置之后、规则文件之前。
 	InlineDirectives []string
+	// VirtualPatches 是启用的内置虚拟补丁模板标识。
+	VirtualPatches []string
+	// VirtualPatchFiles 是自定义 SecLang 虚拟补丁文件。
+	VirtualPatchFiles []string
 	// BodyAccess 对应 SecRequestBodyAccess。
 	BodyAccess bool
 	// BodyLimitBytes 对应 SecRequestBodyLimit。

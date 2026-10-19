@@ -1,6 +1,6 @@
 # WAF 开发优先级与交付路线图（forward-auth 前置校验 · Nginx + Traefik）
 
-> 版本：v0.9（优先级基线；已并入 R24–R26、P3 分级，并记录 M1.3 / M1.4 / M1.5 / M1.6 / **M2** / **M3** 完成情况，见 §10.3、§10.4、§10.7、§10.8、§10.9、**§10.11**；后续缺陷修复与文档收口见 §10.14–§10.17）
+> 版本：v0.10（优先级基线；已并入 R24–R26、P3 分级，并记录 M1.3 / M1.4 / M1.5 / M1.6 / **M2** / **M3** / **M4 能力实现** 完成情况，见 §10.3、§10.4、§10.7、§10.8、§10.9、**§10.11**、**§10.18**；后续缺陷修复与文档收口见 §10.14–§10.17）
 > 配套文档：`docs/forward-auth-design.md`（v0.4：部署形态、架构、抽象接口、第一步详案）、`docs/waf-feature-list.md`（功能全景与原始 P0/P1/P2 分级）
 > 用途：把已确认的全部需求（R1–R21 与本轮新增 R22/R23）转成「**优先级 → 阶段 → 交付文件 → 验收项**」，作为排期与评审的确认基线。
 > 说明：本文件只给出**优先级与交付物落点**的结论；设计细节一律以 `docs/forward-auth-design.md` 为准。
@@ -148,6 +148,10 @@
 | P2-6 | API 安全（OpenAPI/Schema 基线、`@validateSchema` / `@restpath`） | 按需 |
 | P2-7 | 会话安全、敏感数据脱敏、动态防护、ML 评分、多租户 | 按需（部分能力在 forward-auth 形态下不可达） |
 
+> **实现状态**：P2-1 ~ P2-4 已实现（M4，见 §10.18）；P2-5 完成 Basic / HMAC Cookie
+> 站点口令版本（不含 CAPTCHA / JS 无感挑战）；P2-6 完成 OpenAPI 3.x 请求侧契约校验
+> （JSON Schema 常用子集，不含接口资产发现与响应侧校验）。P2-7 仍按需推进。
+
 ### 3.4 P3 — 体验与运营增强（阶段 M5，不阻塞前序阶段）
 
 | # | 能力 | 备注 |
@@ -181,7 +185,7 @@
 | **M1** | MVP 闭环（= 设计文档「步骤 1」） | P0-2 ~ P0-17 | 双代理均可完成「体检测 → 判定 → JSON 送达 → 双类日志」，验收 A1–A31 全绿 |
 | **M2** | 检测引擎生产化（= 步骤 2） | P1-1 ~ P1-6 | CRS 可离线升级 / 热加载 / 回滚；误报例外可配；压缩体覆盖；DetectionOnly 试运行闭环（**已完成**，见 §10.9） |
 | **M3** | 运营与告警（= 步骤 3） | P1-7 ~ P1-10 | 告警多通道可用；封禁/限速可视化；性能基线与容量模型有数据（**已完成**，见 §10.11） |
-| **M4** | 多站点与本地情报（= 步骤 4） | P2-1 ~ P2-4 | 站点级策略生效；GeoIP 与本地情报可导入并定时刷新 |
+| **M4** | 多站点与本地情报（= 步骤 4） | P2-1 ~ P2-6（P2-5/P2-6 基础版） | 站点级策略生效；GeoIP 与本地情报可导入并定时刷新；**代码与单元测试已完成，见 §10.18**；G4 的真实 MMDB / 外部情报数据验收待部署环境补跑 |
 | **M5** | 管理面（= 步骤 5） | **P3**（P3-1 ~ P3-5） | 本地 Web UI + RBAC + 取证包导出；**不阻塞 M1–M4 任何阶段** |
 
 > M0 与 M1 可以合并排期，但 **M0 必须是第一个提交**：此后所有代码都要满足「命名规范 + 全中文注释 + 无 `os/exec` + 无硬编码限额」，越晚补成本越高。
@@ -194,7 +198,7 @@
 | **G1** | M1 出口 | A3–A31 全部通过；两份接入示例（Traefik ≥ v2.11 + OpenResty）在真机实测可用 |
 | **G2**（**已通过**，见 §10.9） | M2 出口 | 规则包可离线升级并回滚（`waf rules manifest/verify/install/rollback`）；`go-ftw` 在册用例全部通过（离线执行器 `test/ftw`，10 个阶段全绿）；DetectionOnly 试运行报告产出（`waf report detection` + `would_block` 日志字段与指标） |
 | **G3**（**已通过**，见 §10.11） | M3 出口 | 告警五条契约用例全绿（送达 / 默认关闭 / 多通道扇出 / 聚合抑制 / 指标计数）；`waf report ban` 与 `--format csv\|xlsx` 导出可被 Excel 直接打开；`scripts/bench/*` 离线压测脚本产出 QPS / P99 与容量档位表 |
-| **G4** | M4 出口 | 站点级策略与 GeoIP / 情报用例通过 |
+| **G4** | M4 出口 | 站点级策略与虚拟补丁用例通过；GeoIP / 情报在真实数据集上通过（实现已完成，见 §10.18；真实 MMDB / 外部情报数据验收待补） |
 | **G5** | M5 出口（P3，可延后） | 管理面权限与审计用例通过；M1–M4 交付不受其阻塞 |
 
 ### 4.3 M1 内部里程碑细分（建议）
@@ -293,11 +297,13 @@
 
 | 文件 / 目录 | 职责 | 阶段 |
 | --- | --- | --- |
-| `internal/sites/*.go`（增强） | 站点级策略：域名/端口绑定规则集、限速、黑白名单 | M4 |
-| `internal/sites/policy.go` | 站点策略合并与优先级（全局 → 站点 → 路由） | M4 |
-| `internal/check/geoip/*.go` | `coraza-geoip` 集成 + 本地 MMDB 加载与热更新 | M4 |
-| `internal/intel/*.go` | 本地威胁情报导入（CIDR / ASN / 域名）与定时刷新 | M4 |
-| `internal/vpatch/*.go` | 虚拟补丁模板与一键启用 | M4 |
+| `internal/sites/*.go`（增强） | 站点级策略：域名绑定规则集、黑白名单、参数覆盖（**已完成**） | M4 |
+| `internal/pipeline/router.go` | 站点 → 具名校验链路由与站点 IP 名单（**已完成**） | M4 |
+| `internal/geoip/*.go` + `internal/check/geoip/*.go` | 本地 MMDB 加载、国家/洲控制与原子热更新（**已完成**，未依赖 `coraza-geoip`） | M4 |
+| `internal/intel/*.go` + `internal/check/threatintel/*.go` | 本地威胁情报（IP/CIDR/ASN/域名）与定时刷新（**已完成**） | M4 |
+| `internal/vpatch/*.go` | 内置 CVE 模板与自定义 SecLang 补丁（**已完成**） | M4 |
+| `internal/apisec/*.go` + `internal/check/apisec/*.go` | OpenAPI 3.x 请求侧契约校验（**已完成基础版**） | P2-6 |
+| `internal/check/challenge/*.go` | Basic / HMAC Cookie 站点口令（**已完成基础版**，不含 CAPTCHA / JS 挑战） | P2-5 |
 | `internal/check/session/*.go` | 会话安全（固定 / 劫持检测） | 按需 |
 | `internal/mask/*.go` | 敏感数据脱敏（若未来引入响应侧通道） | 按需 |
 | `deploy/forward-auth/apisix-*.yaml` | APISIX 等新入口适配（抽象接口已预留 `RequestExtractor`） | 按需 |
@@ -433,10 +439,13 @@ T1 ──▶ T3 ───────────────────┘
 
 1. ~~确认 P0 / P1 / P2 分级与 §8.2 开放问题~~ → **Q1 / Q5 / Q6 已确认并关闭**（R24 / R25 / R26），P3 级别已建立。
 2. ~~M0（T1 骨架重构，替换 GitHub Action 模板）→ M1.1~~ → **已完成**，见 §10.1。
-3. **阶段进度**：**M0 / M1（含 M1.1–M1.6）/ M2 / M3 全部已完成**，对应门禁 **G0 / G1 / G2 / G3 全部通过**
-   （见 §10.1、§10.8、§10.9、§10.11）。**P0 与 P1 级需求已全部闭环**，具备生产上线条件。
+3. **阶段进度**：**M0 / M1（含 M1.1–M1.6）/ M2 / M3 全部已完成**，对应门禁
+   **G0 / G1 / G2 / G3 全部通过**（见 §10.1、§10.8、§10.9、§10.11）。**M4 的能力实现已完成**
+   （P2-1 ~ P2-6 主体，见 §10.18），G4 的真实 MMDB / 外部情报数据验收待部署环境补跑。
+   **P0 与 P1 级需求已全部闭环**，具备生产上线条件。
 4. **下一步（按需推进，均不阻塞已交付能力）**：
-   - **M4**（P2）：站点级差异化策略、GeoIP 地域控制、本地威胁情报导入与定时刷新、虚拟补丁；
+   - **M4 验收收口**：使用真实 GeoLite2 Country / ASN MMDB 与生产情报样本补跑 G4；
+   - **按需增强**：CAPTCHA / JS 无感挑战、API 资产发现与响应侧契约校验；
    - **M5**（P3）：管理面 Web UI + RBAC + 取证包导出（已明确下调，不阻塞 M4）；
    - **上线动作**：按 `docs/operations.md` §1「上线前动作」逐项确认；用 `scripts/bench/*` 在目标机型实测一次以校准容量档位。
 5. 仍待答复且**不阻塞**的问题：Q2、Q3、Q4、Q7、Q8、Q9、Q10、Q11、Q12（见 §8.2）。
@@ -444,7 +453,7 @@ T1 ──▶ T3 ───────────────────┘
 
 ---
 
-> 本文件为**优先级基线 v0.9**。任何优先级调整必须在本文件 §8.3 记录并注明理由，保证「需求 → 优先级 → 文件 → 验收」四者可追溯。
+> 本文件为**优先级基线 v0.10**。任何优先级调整必须在本文件 §8.3 记录并注明理由，保证「需求 → 优先级 → 文件 → 验收」四者可追溯。
 
 ---
 
@@ -1227,3 +1236,50 @@ T1 ──▶ T3 ───────────────────┘
 | 直通形态下真正的「无框架头 POST」不再被拦 | 该形态保留客户端原始头，920180 仍会命中，属于预期 | 无需处理 |
 | 代理确实没转发请求体时，WAF 看不到请求体内容 | 这是接入形态的固有边界，不是本缺陷 | 由 §3.7 启动能力清单 + `ingress.body.mode` 告警暴露；需要体检测就必须用 Traefik `forwardBody` 或 OpenResty 体捕获通道（R4） |
 | `Content-Length: 0` 在此处的含义是「WAF 收到的报文无体」 | 与「客户端声明空体」是两个概念 | 后者由 `Declared` 承载（§10.15），告警语义不受本次改动影响 |
+
+### 10.18 已完成：M4 能力实现（多站点 / 本地情报 / 虚拟补丁 / API 契约 / 站点口令）
+
+**目标**：在 forward-auth 形态不变的前提下，补齐多站点差异化、本地 GeoIP 与威胁情报、
+CVE 虚拟补丁、OpenAPI 请求契约校验和本地站点口令保护。
+
+#### 交付总览
+
+| 能力 | 交付物 | 状态 |
+| --- | --- | --- |
+| P2-1 多站点差异化 | `config.pipelines[]`、`sites[].pipeline`、`sites[].allowlist/blocklist/access_action/access_score`、`internal/pipeline/router.go` | 已完成 |
+| P2-1 站点级引擎模式 | `sites[].engine_mode` → Coraza 事务级 `ctl:ruleEngine`（规则 ID `901900+`） | 已完成 |
+| P2-2 GeoIP | `internal/geoip`（Country/City MMDB）、`internal/check/geoip`（国家/洲 allow/block + 热更新） | 已完成（真实 MMDB 验收待补） |
+| P2-3 本地威胁情报 | `internal/intel`（IP/CIDR、ASN、精确域名、`*.suffix`）、`internal/check/threatintel`（文件/目录 + 指纹热更新） | 已完成 |
+| P2-4 虚拟补丁 | `internal/vpatch`：Log4Shell / Spring4Shell / Apache 路径穿越 / PAN-OS 命令注入模板 + 自定义 `.conf` | 已完成 |
+| P2-5 站点口令 | `internal/check/challenge`：Basic、签名 Cookie、`basic_or_cookie`；常量时间口令比较 | 已完成基础版 |
+| P2-6 API 契约 | `internal/apisec` + `internal/check/apisec`：OpenAPI 3.x、路径/查询/Header/Cookie 参数、JSON 请求体 | 已完成基础版 |
+
+#### 关键设计取舍
+
+| 决策点 | 结论 | 理由 |
+| --- | --- | --- |
+| 多站点链路选择 | 装配期构建默认链与具名链，请求期按 `rctx.Site.Name` O(1) 选择 | 不在每个请求上重新构造插件；站点名单命中先于校验链执行 |
+| 站点级 `engine_mode` | 不重复编译规则集，用 phase 1 的 `ctl:ruleEngine` 按 Host 切换事务模式 | 同一份 CRS 同时服务 `on` / `detection_only` 站点，避免规则集复制 |
+| 站点引擎规则 ID | 使用 `901900+` | 避开例外规则 `900300+`、内置 CRS `901001-901500` 与项目其它注入 ID |
+| GeoIP 实现 | 自研本地 MMDB 读取与查询，不依赖 `coraza-geoip` | 保持 `CGO_ENABLED=0`，查询与热更新逻辑可控，失败时保留旧 reader |
+| 威胁情报格式 | 文本 / CSV / YAML / JSON 统一加载，目录递归扫描 | 便于离线环境导入多家情报源，文件指纹只含路径/大小/修改时间 |
+| 虚拟补丁位置 | CRS 规则之后、全局例外之前 | 补丁可独立命中，同时允许通过 `engine.exceptions` 做误报治理 |
+| API 契约范围 | 只做请求侧 OpenAPI 3.x 与 JSON Schema 常用子集 | forward-auth 形态看不到业务响应体；先覆盖最常用的契约违规场景 |
+| 本地挑战 | Basic + HMAC-SHA256 无状态 Cookie，不维护会话表 | 多实例无需共享会话；不使用弱口令明文落日志 |
+
+#### 验证结果
+
+- `go test ./... -count=1` 全部通过（含新增 router / 站点字段 / 配置校验 / 规则 ID 唯一性测试）。
+- `go test ./internal/apisec ./internal/check/apisec ./internal/check/challenge ./internal/intel ./internal/vpatch -count=1` 通过。
+- `waf check-config -c configs/waf.example.yaml` 通过。
+- 规则 ID 冲突回归：站点 `engine_mode` 规则与作用域例外不再共用 `900300`。
+
+#### 已知边界
+
+| 边界 | 说明 |
+| --- | --- |
+| GeoIP 数据集 | 只支持本地 MaxMind MMDB；G4 需要部署方提供真实 GeoLite2 Country/City 与 ASN 数据 |
+| ASN 情报刷新 | 情报文件按指纹轮询；ASN MMDB 自身更新需等待同一刷新周期触发 |
+| `apisec` | 只做请求侧；只支持 OpenAPI 3.x、JSON 请求体和 `components.schemas` 的本地 `$ref`；不执行完整 `format` 语义，不校验 XML / multipart 结构 |
+| `challenge` | 不是 CAPTCHA / JS 无感挑战；Nginx 原生 `auth_request` 默认不透传 `Set-Cookie`，Cookie 模式需 Traefik / OpenResty 配合 |
+| 自定义虚拟补丁 | 按行拆分，不处理跨行 `chain` 续行；复杂规则建议写成单行或使用 `engine.inline_directives` |

@@ -43,7 +43,7 @@ func TestBuildDirectivesPlacesExceptionsAroundRuleFiles(t *testing.T) {
 		Post: []string{"SecRuleRemoveById 941100"},
 	}
 
-	directive := buildDirectives(set, deps.Engine, false, exceptionSet)
+	directive := buildDirectives(set, deps.Engine, false, exceptionSet, nil)
 
 	firstRuleFile := strings.Index(directive, "Include REQUEST-")
 	if firstRuleFile < 0 {
@@ -75,13 +75,13 @@ func TestBuildDirectivesInjectsAnomalyScoreThreshold(t *testing.T) {
 
 	// 与 CRS 默认值一致时不生成动作，避免无意义的指令。
 	deps.Engine.AnomalyScoreThreshold = defaultAnomalyScoreThreshold
-	baseline := buildDirectives(set, deps.Engine, false, nil)
+	baseline := buildDirectives(set, deps.Engine, false, nil, nil)
 	if strings.Contains(baseline, "tx.inbound_anomaly_score_threshold=") {
 		t.Errorf("阈值等于 CRS 默认值 %d 时不应注入覆盖指令", defaultAnomalyScoreThreshold)
 	}
 
 	deps.Engine.AnomalyScoreThreshold = 12
-	directive := buildDirectives(set, deps.Engine, false, nil)
+	directive := buildDirectives(set, deps.Engine, false, nil, nil)
 	if !strings.Contains(directive, "tx.inbound_anomaly_score_threshold=12") {
 		t.Fatalf("阈值应被注入到指令中：%s", directive)
 	}
@@ -91,6 +91,41 @@ func TestBuildDirectivesInjectsAnomalyScoreThreshold(t *testing.T) {
 	// 与偏执等级覆盖同理：必须排在规则文件之前，否则 CRS 的阻断判定仍用旧值。
 	if strings.Index(directive, "tx.inbound_anomaly_score_threshold=12") > strings.Index(directive, "Include REQUEST-") {
 		t.Errorf("阈值覆盖必须排在规则文件之前")
+	}
+}
+
+// TestSiteEngineModeDirectiveIDsDoNotCollide 验证站点引擎模式规则的 ID 区间
+// 与作用域例外规则不重叠，避免 Coraza 编译期报重复规则 ID。
+func TestSiteEngineModeDirectiveIDsDoNotCollide(t *testing.T) {
+	deps := testDeps(t)
+	set := loadRules(t, deps)
+	sites := []*core.Site{
+		{Name: "detect", Hosts: []string{"detect.example.com"}, EngineMode: ModeDetectionOnly},
+		{Name: "wild", Hosts: []string{"*.example.com"}, EngineMode: ModeOn},
+		{Name: "inherit", Hosts: []string{"inherit.example.com"}, EngineMode: "inherit"},
+	}
+	exceptionSet := &exceptions.Set{Pre: []string{
+		`SecRule REQUEST_URI "@rx ^/a$" "id:900300,phase:1,pass,nolog,noauditlog,ctl:ruleRemoveById=942100"`,
+		`SecRule REQUEST_URI "@rx ^/b$" "id:900301,phase:1,pass,nolog,noauditlog,ctl:ruleRemoveById=942200"`,
+	}}
+
+	directives := siteEngineModeDirectives(sites)
+	if len(directives) != 2 {
+		t.Fatalf("应为两个显式 engine_mode 站点生成规则，实际 %d 条：%v", len(directives), directives)
+	}
+	// 精确 Host 的具体性高于通配，因此先分配 901900。
+	if !strings.Contains(directives[0], "id:901900") || !strings.Contains(directives[0], "ctl:ruleEngine=DetectionOnly") {
+		t.Fatalf("精确站点规则不符合预期：%s", directives[0])
+	}
+	if !strings.Contains(directives[1], "id:901901") || !strings.Contains(directives[1], "ctl:ruleEngine=On") {
+		t.Fatalf("通配站点规则不符合预期：%s", directives[1])
+	}
+
+	all := buildDirectives(set, deps.Engine, false, exceptionSet, sites)
+	for _, id := range []string{"id:900300", "id:900301", "id:901900", "id:901901"} {
+		if count := strings.Count(all, id); count != 1 {
+			t.Fatalf("规则 ID %s 出现 %d 次，期望恰好 1 次", id, count)
+		}
 	}
 }
 

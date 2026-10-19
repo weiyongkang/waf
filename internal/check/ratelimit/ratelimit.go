@@ -395,6 +395,7 @@ func (c *Check) buildResult(rctx *core.RequestContext, values []dimensionValue, 
 	finding := core.NewFinding(c.name, ruleIDRateLimit,
 		"请求频率超过限速阈值", core.SeverityMedium, c.score)
 	finding.Data = map[string]string{
+		"target":     summarizeDimensions(values),
 		"dimensions": summarizeDimensions(values),
 		"count":      strconv.FormatInt(count, 10),
 		"allowed":    strconv.FormatInt(allowed, 10),
@@ -415,6 +416,8 @@ func (c *Check) buildResult(rctx *core.RequestContext, values []dimensionValue, 
 			TTL:    c.banTTL.Duration(),
 			Reason: reason,
 			RuleID: ruleIDRateLimit,
+			Check:  c.name,
+			Target: summarizeDimensions(values),
 		})
 	}
 

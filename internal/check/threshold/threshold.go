@@ -195,9 +195,10 @@ func (c *Check) Evaluate(rctx *core.RequestContext) (*core.Result, error) {
 		return nil, nil
 	}
 
+	action := c.effectiveAction(rctx)
 	verdict := core.VerdictBlock
 	code := config.CodeBlocked
-	if c.action == ActionObserve {
+	if action == ActionObserve {
 		verdict = core.VerdictObserve
 		code = ""
 	}
@@ -209,10 +210,11 @@ func (c *Check) Evaluate(rctx *core.RequestContext) (*core.Result, error) {
 		fmt.Sprintf("异常评分 %d 达到阈值 %d", total, c.threshold),
 		core.SeverityHigh, c.score)
 	finding.Data = map[string]string{
+		"target":    c.scoreKey,
 		"score":     fmt.Sprintf("%d", total),
 		"threshold": fmt.Sprintf("%d", c.threshold),
 		"score_key": c.scoreKey,
-		"action":    c.action,
+		"action":    action,
 	}
 	result.AddFinding(finding)
 
@@ -221,9 +223,20 @@ func (c *Check) Evaluate(rctx *core.RequestContext) (*core.Result, error) {
 		"request_id", rctx.RequestID,
 		"score", total,
 		"threshold", c.threshold,
-		"action", c.action,
+		"action", action,
 	)
 	return result, nil
+}
+
+// effectiveAction 返回本次请求实际生效的阈值动作。
+//
+// 站点级 engine_mode=detection_only 必须覆盖实例级的 block：否则引擎已经
+// 按站点观察命中，threshold 又把请求拦住，站点灰度会静默失效。
+func (c *Check) effectiveAction(rctx *core.RequestContext) string {
+	if rctx != nil && rctx.Site != nil && rctx.Site.EngineMode == "detection_only" {
+		return ActionObserve
+	}
+	return c.action
 }
 
 // DefaultOnError 返回失败策略默认值。

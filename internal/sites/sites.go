@@ -26,6 +26,7 @@ import (
 
 	"github.com/weiyongkang/waf/internal/config"
 	"github.com/weiyongkang/waf/internal/core"
+	"github.com/weiyongkang/waf/internal/netx"
 )
 
 // catchAll 是匹配全部 Host 的通配模式。
@@ -75,9 +76,11 @@ func New(opts Options) (*Resolver, error) {
 	resolver := &Resolver{
 		exact: make(map[string]*core.Site, len(opts.Declared)),
 		defaultSite: &core.Site{
-			Name:       core.DefaultSiteName,
-			Hosts:      []string{catchAll},
-			EngineMode: config.EngineModeInherit,
+			Name:         core.DefaultSiteName,
+			Hosts:        []string{catchAll},
+			EngineMode:   config.EngineModeInherit,
+			Pipeline:     "default",
+			AccessAction: "block",
 		},
 	}
 
@@ -99,13 +102,35 @@ func New(opts Options) (*Resolver, error) {
 		}
 
 		site := &core.Site{
-			Name:       name,
-			Hosts:      append([]string(nil), declared.Hosts...),
-			EngineMode: declared.EngineMode,
-			Params:     declared.Params,
+			Name:         name,
+			Hosts:        append([]string(nil), declared.Hosts...),
+			EngineMode:   declared.EngineMode,
+			Pipeline:     declared.Pipeline,
+			Allowlist:    append([]string(nil), declared.Allowlist...),
+			Blocklist:    append([]string(nil), declared.Blocklist...),
+			AccessAction: declared.AccessAction,
+			AccessScore:  declared.AccessScore,
+			Params:       declared.Params,
 		}
 		if site.EngineMode == "" {
 			site.EngineMode = config.EngineModeInherit
+		}
+		if site.Pipeline == "" {
+			site.Pipeline = "default"
+		}
+		if site.AccessAction == "" {
+			site.AccessAction = "block"
+		}
+		// 名单在站点装配阶段解析一次，非法条目必须 fail fast；运行期由
+		// pipeline.Router 持有解析后的集合，避免每个请求重复解析。
+		if _, err := netx.NewSet(site.Allowlist); err != nil {
+			return nil, fmt.Errorf("站点 %q 的 allowlist 非法：%w", name, err)
+		}
+		if _, err := netx.NewSet(site.Blocklist); err != nil {
+			return nil, fmt.Errorf("站点 %q 的 blocklist 非法：%w", name, err)
+		}
+		if site.AccessAction != "block" && site.AccessAction != "observe" {
+			return nil, fmt.Errorf("站点 %q 的 access_action = %q 非法，可选值：block / observe", name, site.AccessAction)
 		}
 
 		// 站点内部的模式之间也按「精确优先、通配次之」登记，

@@ -10,9 +10,10 @@
 # 与 Nginx(OpenResty) 通道的差异（设计文档 §3.3 / §4.3.3）：
 #   1) forwardBody: true 时请求体随鉴权子请求送达，因此可以做请求体检测；
 #   2) Traefik 不会把鉴权子请求的响应体交给客户端，
-#      因此 JSON 错误体必须通过 errors 中间件回源到 WAF 的 /waf/deny 渲染端点；
+#      因此 JSON 错误体与蜜罐页面都必须通过 errors 中间件回源到 WAF 的 /waf/deny；
 #   3) errors 中间件的 query 模板无法读取鉴权响应头（没有 auth_request_set 等价能力），
-#      因此这里把 {status} 作为 code 传给渲染端点，由 WAF 依据状态码反推错误码。
+#      因此这里把 {status} 作为 code 传给渲染端点；WAF 对 403 会再执行一次
+#      蜜罐规则重匹配，命中则返回规则页面，未命中才返回 JSON 错误体。
 #
 # 装载方式（静态配置中声明动态配置目录）：
 #   providers:
@@ -56,10 +57,13 @@ http:
           - X-WAF-Verdict
           - X-WAF-Code
           - X-WAF-Rule-Id
+          - X-WAF-Target
+          - X-WAF-Ban-Scope
           - X-WAF-Version
 
     # -------------------------------------------------------------------------
-    # 错误渲染中间件：把 4xx/5xx 响应替换为 WAF 渲染的 JSON 错误体
+    # 错误渲染中间件：把 4xx/5xx 响应替换为 WAF 渲染的最终响应
+    # （普通拦截为 JSON，蜜罐命中为规则定义的伪造页面）。
     # -------------------------------------------------------------------------
     waf-errors:
       errors:
@@ -72,7 +76,8 @@ http:
 
         # 查询参数模板：
         #   {status} 是 Traefik 提供的占位符，表示原始响应状态码。
-        #   WAF 的 /waf/deny 端点在 code 为纯数字时按 HTTP 状态码反推错误码。
+        #   WAF 的 /waf/deny 端点在 code 为纯数字时按 HTTP 状态码反推错误码；
+        #   对 403 还会按 X-Forwarded-Uri / X-Forwarded-Method 重匹配蜜罐规则。
         query: "/waf/deny?code={status}"
 
   services:
@@ -97,7 +102,7 @@ http:
     #   （即 New(m1, m2).Then(app) == m1(m2(app))，请求先经过 m1）。
     #   forwardAuth 判定失败时会直接 WriteHeader 返回，**不会调用下游**；
     #   只有把 errors 放在外层，它才能观察到 forwardAuth 写出的 403/429，
-    #   进而回源 /waf/deny 渲染 JSON 错误体。
+    #   进而回源 /waf/deny 渲染最终响应（JSON 或蜜罐页面）。
     #   若顺序写反（waf-auth 在前），鉴权失败产生的 403 会直接返回给客户端，
     #   表现为「JSON 错误体丢失、只剩 Traefik 默认错误页」。
     #

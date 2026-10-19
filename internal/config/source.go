@@ -38,6 +38,10 @@ type Resolved struct {
 	Origins map[string]Origin
 	// Files 是按顺序参与叠加的配置文件列表（后者覆盖前者）。
 	Files []string
+	// ConfigInputs 是用户通过 -c 指定的原始路径列表（文件或目录），供配置目录监听使用。
+	ConfigInputs []string
+	// ConfigDirs 是 ConfigInputs 中属于目录的路径，只有这些目录会启用动态监听。
+	ConfigDirs []string
 	// TotalItems 是配置项总数（叶子路径数量），用于统计「使用内置默认值」的项数。
 	TotalItems int
 }

@@ -2,6 +2,8 @@ package coraza
 
 import (
 	"fmt"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/weiyongkang/waf/internal/core"
@@ -47,6 +49,12 @@ func resolveEngine(engine core.EngineSettings, settings Settings) (core.EngineSe
 	}
 	if settings.InlineDirectives != nil {
 		effective.InlineDirectives = settings.InlineDirectives
+	}
+	if settings.VirtualPatches != nil {
+		effective.VirtualPatches = settings.VirtualPatches
+	}
+	if settings.VirtualPatchFiles != nil {
+		effective.VirtualPatchFiles = settings.VirtualPatchFiles
 	}
 	if settings.BodyAccess != nil {
 		effective.BodyAccess = *settings.BodyAccess
@@ -115,7 +123,8 @@ func resolveEngine(engine core.EngineSettings, settings Settings) (core.EngineSe
 //
 // 关于 JSON 深度限制：Coraza v3.0.0 不提供对应指令（其 JSON 处理器没有深度保护），
 // 因此该限额由本包自行实现（见 jsondepth.go），不在此处生成指令。
-func buildDirectives(set *rules.Set, engine core.EngineSettings, bodyAccess bool, exceptions *exceptions.Set) string {
+func buildDirectives(set *rules.Set, engine core.EngineSettings, bodyAccess bool,
+	exceptions *exceptions.Set, sites []*core.Site, extraGroups ...[]string) string {
 	var builder strings.Builder
 
 	// 第 1 段：CRS 设置文件。
@@ -133,6 +142,18 @@ func buildDirectives(set *rules.Set, engine core.EngineSettings, bodyAccess bool
 	// 响应体检测不在本方案的范围内（forward-auth 前置校验看不到业务响应体）。
 	fmt.Fprintf(&builder, "SecAuditEngine Off\n")
 	fmt.Fprintf(&builder, "SecDebugLogLevel 0\n")
+
+	// 第 2.5 段：站点级引擎模式覆盖。
+	//
+	// Coraza 的 SecRuleEngine 是 WAF 级配置，但 ctl:ruleEngine 是事务级动作。
+	// 在 phase 1 最前面按 Host 注入该动作，就能让同一份已编译规则同时服务
+	// on / detection_only 两种站点策略，而无需为每个站点重复编译规则集。
+	// 规则顺序按「精确 Host -> 较长通配后缀 -> 通配全部」排列，与 sites.Resolver
+	// 的匹配优先级一致，避免多个站点规则同时命中时取到较弱的具体性。
+	for _, directive := range siteEngineModeDirectives(sites) {
+		builder.WriteString(directive)
+		builder.WriteString("\n")
+	}
 
 	// 第 3 段：运维自定义指令。
 	for _, directive := range engine.InlineDirectives {
@@ -198,6 +219,20 @@ func buildDirectives(set *rules.Set, engine core.EngineSettings, bodyAccess bool
 		fmt.Fprintf(&builder, "Include %s\n", file)
 	}
 
+	// 第 5.5 段：虚拟补丁规则。
+	// 放在 CRS 规则之后、全局例外之前：补丁规则可以独立命中，同时仍允许
+	// 运维通过 exceptions 对具体规则做误报治理。
+	for _, group := range extraGroups {
+		for _, directive := range group {
+			trimmed := strings.TrimSpace(directive)
+			if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+				continue
+			}
+			builder.WriteString(trimmed)
+			builder.WriteString("\n")
+		}
+	}
+
 	// 第 6 段：全局误报例外（静态移除指令，必须在规则文件之后）。
 	if exceptions != nil {
 		for _, directive := range exceptions.Post {
@@ -206,6 +241,79 @@ func buildDirectives(set *rules.Set, engine core.EngineSettings, bodyAccess bool
 		}
 	}
 	return builder.String()
+}
+
+// siteEngineModeRuleIDBase 是站点级引擎模式覆盖规则的 ID 起始值。
+//
+// 取 901900：避开项目已占用的 900100 / 900110 / 900200 / 900300 区间，
+// 也避开内置 CRS 在 REQUEST-901 初始化阶段使用的 901001-901500 区间。
+// 站点规则按站点数量顺序分配，实际配置中通常只有个位数。
+const siteEngineModeRuleIDBase = 901900
+
+// siteEngineModeDirectives 为显式声明 engine_mode 的站点生成事务级切换规则。
+func siteEngineModeDirectives(sites []*core.Site) []string {
+	type candidate struct {
+		site    *core.Site
+		pattern string
+		rank    int
+	}
+	candidates := make([]candidate, 0, len(sites))
+	for _, site := range sites {
+		if site == nil {
+			continue
+		}
+		mode := strings.TrimSpace(site.EngineMode)
+		if mode != ModeOn && mode != ModeDetectionOnly {
+			continue // inherit 或空值不生成覆盖规则
+		}
+		for _, host := range site.Hosts {
+			pattern, rank := siteHostPattern(host)
+			if pattern == "" {
+				continue
+			}
+			candidates = append(candidates, candidate{site: site, pattern: pattern, rank: rank})
+		}
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].rank != candidates[j].rank {
+			return candidates[i].rank > candidates[j].rank
+		}
+		return len(candidates[i].pattern) > len(candidates[j].pattern)
+	})
+
+	directives := make([]string, 0, len(candidates))
+	for index, item := range candidates {
+		engineValue := "On"
+		if strings.TrimSpace(item.site.EngineMode) == ModeDetectionOnly {
+			engineValue = "DetectionOnly"
+		}
+		directives = append(directives, fmt.Sprintf(
+			"SecRule REQUEST_HEADERS:Host \"@rx %s\" "+
+				"\"id:%d,phase:1,pass,nolog,noauditlog,ctl:ruleEngine=%s\"",
+			item.pattern, siteEngineModeRuleIDBase+index, engineValue,
+		))
+	}
+	return directives
+}
+
+// siteHostPattern 把站点 Host 模式转换为锚定正则，并返回匹配具体性排序值。
+// 精确 Host 返回 3，*.后缀 返回 2，* 返回 1。
+func siteHostPattern(host string) (string, int) {
+	trimmed := strings.ToLower(strings.TrimSpace(host))
+	if trimmed == "" {
+		return "", 0
+	}
+	if trimmed == "*" {
+		return "^.*$", 1
+	}
+	if strings.HasPrefix(trimmed, "*.") {
+		suffix := strings.TrimPrefix(trimmed, "*.")
+		if suffix == "" {
+			return "", 0
+		}
+		return "^[^.]+\\.(?:[^.]+\\.)*" + regexp.QuoteMeta(suffix) + "$", 2
+	}
+	return "^" + regexp.QuoteMeta(trimmed) + "$", 3
 }
 
 // 异常评分阈值覆盖动作的规则 ID。

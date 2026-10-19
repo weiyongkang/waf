@@ -38,6 +38,8 @@ type banRecord struct {
 	Key string `json:"key"`
 	// Reason 是封禁原因，仅 op=ban 时有效。
 	Reason string `json:"reason,omitempty"`
+	// BannedAt 是首次封禁时间；省略表示旧版本记录未提供。
+	BannedAt *time.Time `json:"banned_at,omitempty"`
 	// ExpireAt 是封禁到期时间；省略表示永不过期。
 	ExpireAt *time.Time `json:"expire_at,omitempty"`
 }
@@ -136,15 +138,42 @@ func NewFileStore(opts FileStoreOptions) (*FileStore, error) {
 	return fileStore, nil
 }
 
-// Ban 追加一条封禁记录并写入内存名单（core.Store 实现）。
+// Ban 追加一条封禁记录并写入内存名单，已存在时强制覆盖（core.Store 实现）。
 func (s *FileStore) Ban(ctx context.Context, key string, ttl time.Duration, reason string) error {
-	if err := s.MemoryStore.Ban(ctx, key, ttl, reason); err != nil {
+	now := s.clock.Now()
+	expireAt := expiryFrom(now, ttl)
+	if _, err := s.MemoryStore.putBan(key, reason, now, expireAt, false); err != nil {
 		return err
 	}
+	return s.appendBanRecord(key, reason, now, expireAt)
+}
 
+// BanIfAbsent 仅在 key 不存在或已过期时写入封禁记录（core.Store 实现）。
+//
+// 只有实际创建封禁时才追加持久化记录，避免重复命中把文件撑大。
+func (s *FileStore) BanIfAbsent(ctx context.Context, key string, ttl time.Duration, reason string) (bool, error) {
+	now := s.clock.Now()
+	expireAt := expiryFrom(now, ttl)
+	created, err := s.MemoryStore.putBan(key, reason, now, expireAt, true)
+	if err != nil || !created {
+		return created, err
+	}
+	if err := s.appendBanRecord(key, reason, now, expireAt); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// appendBanRecord 持久化一条封禁记录。
+func (s *FileStore) appendBanRecord(key, reason string, bannedAt, expireAt time.Time) error {
 	record := banRecord{Op: fileOpBan, Key: key, Reason: reason}
-	if expireAt := expiryFrom(s.clock.Now(), ttl); !expireAt.IsZero() {
-		record.ExpireAt = &expireAt
+	if !bannedAt.IsZero() {
+		value := bannedAt
+		record.BannedAt = &value
+	}
+	if !expireAt.IsZero() {
+		value := expireAt
+		record.ExpireAt = &value
 	}
 	return s.append(record)
 }
@@ -251,11 +280,16 @@ func (s *FileStore) replay() error {
 				// 已过期的历史记录直接忽略，不进入内存。
 				continue
 			}
-			ttl := time.Duration(0)
-			if record.ExpireAt != nil {
-				ttl = record.ExpireAt.Sub(now)
+			bannedAt := now
+			if record.BannedAt != nil {
+				bannedAt = *record.BannedAt
 			}
-			if err := s.MemoryStore.Ban(context.Background(), record.Key, ttl, record.Reason); err != nil {
+			expireAt := time.Time{}
+			if record.ExpireAt != nil {
+				expireAt = *record.ExpireAt
+			}
+			// 回放使用记录中的绝对时间，保证重启后到期时间与首次封禁时间不变。
+			if _, err := s.MemoryStore.putBan(record.Key, record.Reason, bannedAt, expireAt, false); err != nil {
 				skipped++
 				continue
 			}
@@ -322,6 +356,10 @@ func (s *FileStore) compactLocked() error {
 	writer := bufio.NewWriter(tempFile)
 	for key, item := range live {
 		record := banRecord{Op: fileOpBan, Key: key, Reason: item.reason}
+		if !item.bannedAt.IsZero() {
+			bannedAt := item.bannedAt
+			record.BannedAt = &bannedAt
+		}
 		if !item.expireAt.IsZero() {
 			expireAt := item.expireAt
 			record.ExpireAt = &expireAt

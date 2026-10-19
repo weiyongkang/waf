@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/weiyongkang/waf/internal/config"
@@ -39,6 +40,8 @@ type Options struct {
 	// 且其实现（internal/notify）依赖 HTTP 客户端等资源，
 	// 让 server 只依赖 core.AlertSink 接口可以保持 HTTP 处理层零外送知识。
 	Alerts core.AlertSink
+	// Audit 是请求审计入口；为 nil 时使用丢弃全部记录的空实现。
+	Audit core.AuditSink
 	// MetricsHandler 是指标暴露处理器（由 internal/observe 提供）；
 	// 为 nil 时 handleMetrics 输出「尚未接入」的占位文本。
 	MetricsHandler http.Handler
@@ -66,11 +69,10 @@ type Options struct {
 // Server 是 forward-auth HTTP 服务。
 type Server struct {
 	cfg                *config.Config
-	decider            core.Decider
 	extractor          core.RequestExtractor
-	responder          *responder.Writer
 	metrics            core.MetricsRecorder
 	alerts             core.AlertSink
+	audit              core.AuditSink
 	metricsHTTPHandler http.Handler
 	metricsPath        string
 	systemLogger       *slog.Logger
@@ -78,9 +80,38 @@ type Server struct {
 	version            string
 	clock              core.Clock
 	startedAt          time.Time
-	sites              core.SiteResolver
 	http               *http.Server
 	metricsHTTP        *http.Server
+	// runtime 是请求处理使用的不可变快照；重载通过原子替换切换。
+	runtime atomic.Pointer[runtimeState]
+}
+
+// runtimeState 是一次配置加载对应的请求处理快照。
+//
+// 使用引用计数延迟关闭旧 decider：重载发生时，已经在途的请求可能仍持有旧快照，
+// 立即 Close 会让校验单元在请求中途释放资源。最后一个引用释放后才关闭旧 decider。
+type runtimeState struct {
+	cfg       *config.Config
+	decider   core.Decider
+	responder *responder.Writer
+	sites     core.SiteResolver
+
+	refs      atomic.Int64
+	retired   atomic.Bool
+	closeOnce sync.Once
+	closeErr  error
+}
+
+// ReloadOptions 是运行期热重载的参数。
+type ReloadOptions struct {
+	// Config 是重新加载并校验后的配置。
+	Config *config.Config
+	// Decider 是按新 pipeline / engine / ban 装配出的校验链。
+	Decider core.Decider
+	// Responder 是新的响应渲染器；为 nil 时按 Config 重新构建。
+	Responder *responder.Writer
+	// Sites 是新的站点解析器。
+	Sites core.SiteResolver
 }
 
 // New 构造 HTTP 服务并完成路由装配。
@@ -106,14 +137,26 @@ func New(opts Options) (*Server, error) {
 	if alerts == nil {
 		alerts = core.NoopAlertSink{}
 	}
+	audit := opts.Audit
+	if audit == nil {
+		audit = core.NoopAuditSink{}
+	}
+
+	writer := opts.Responder
+	if writer == nil {
+		var err error
+		writer, err = buildResponder(opts.Config, opts.Version, clock, opts.SystemLogger)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	srv := &Server{
 		cfg:                opts.Config,
-		decider:            decider,
 		extractor:          opts.Extractor,
-		responder:          opts.Responder,
 		metrics:            metrics,
 		alerts:             alerts,
+		audit:              audit,
 		metricsHTTPHandler: opts.MetricsHandler,
 		metricsPath:        metricsEndpointPath(opts),
 		systemLogger:       opts.SystemLogger,
@@ -121,36 +164,163 @@ func New(opts Options) (*Server, error) {
 		version:            opts.Version,
 		clock:              clock,
 		startedAt:          clock.Now(),
-		sites:              opts.Sites,
 	}
-	if srv.responder == nil {
-		forceStatus := 0
-		// Nginx 原生 auth_request 通道只能透传 401/403，其它状态码会被改写成 500，
-		// 因此该通道下统一回 403，真实语义由 X-WAF-Code 响应头承载（需求 R22）。
-		if srv.cfg.Ingress.Type == config.IngressTypeNginxAuthOnly {
-			forceStatus = http.StatusForbidden
-		}
-		srv.responder = responder.New(responder.Config{
-			IncludeDetails:  srv.cfg.Responder.IncludeDetails,
-			Messages:        srv.cfg.Responder.Messages,
-			ForceHTTPStatus: forceStatus,
-			Version:         srv.version,
-			Clock:           srv.clock,
-		})
-	}
+	srv.runtime.Store(newRuntimeState(opts.Config, decider, writer, opts.Sites))
 	return srv, nil
+}
+
+// buildResponder 依据配置构建 JSON 响应渲染器。
+func buildResponder(cfg *config.Config, version string, clock core.Clock, logger *slog.Logger) (*responder.Writer, error) {
+	forceStatus := 0
+	// Nginx 原生 auth_request 通道只能透传 401/403，其它状态码会被改写成 500，
+	// 因此该通道下统一回 403，真实语义由 X-WAF-Code 响应头承载（需求 R22）。
+	if cfg.Ingress.Type == config.IngressTypeNginxAuthOnly {
+		forceStatus = http.StatusForbidden
+	}
+	writer, err := responder.New(responder.Config{
+		IncludeDetails:  cfg.Responder.IncludeDetails,
+		Messages:        cfg.Responder.Messages,
+		Template:        cfg.Responder.Template,
+		TemplateFile:    cfg.Responder.TemplateFile,
+		MaxBodyBytes:    cfg.Responder.MaxBodyBytes,
+		ForceHTTPStatus: forceStatus,
+		Version:         version,
+		Clock:           clock,
+		Logger:          logger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("构造响应渲染器失败：%w", err)
+	}
+	return writer, nil
+}
+
+// newRuntimeState 创建请求处理快照。
+func newRuntimeState(cfg *config.Config, decider core.Decider, writer *responder.Writer, siteResolver core.SiteResolver) *runtimeState {
+	if decider == nil {
+		decider = core.AllowAllDecider{}
+	}
+	return &runtimeState{cfg: cfg, decider: decider, responder: writer, sites: siteResolver}
+}
+
+// Reload 原子替换请求处理快照；失败时旧配置继续服务。
+func (s *Server) Reload(opts ReloadOptions) error {
+	if opts.Config == nil {
+		return errors.New("server: 重载配置不能为空")
+	}
+	if err := s.validateReload(opts.Config); err != nil {
+		return err
+	}
+
+	writer := opts.Responder
+	if writer == nil {
+		var err error
+		writer, err = buildResponder(opts.Config, s.version, s.clock, s.systemLogger)
+		if err != nil {
+			return err
+		}
+	}
+
+	next := newRuntimeState(opts.Config, opts.Decider, writer, opts.Sites)
+	old := s.runtime.Swap(next)
+	if old != nil {
+		old.retire()
+	}
+	return nil
+}
+
+// validateReload 防御性检查路由与监听相关字段未被热更新。
+//
+// 主流程已经用 config.RestartRequiredChanges 做了完整静态段校验；这里再校验
+// 与 Handler 已注册路由直接绑定的字段，防止未来调用方绕过完整校验。
+func (s *Server) validateReload(next *config.Config) error {
+	current := s.cfg
+	switch {
+	case current.Server.Listen != next.Server.Listen:
+		return errors.New("server.listen 变更需要重启")
+	case current.Server.MetricsListen != next.Server.MetricsListen:
+		return errors.New("server.metrics_listen 变更需要重启")
+	case current.Server.BasePath != next.Server.BasePath:
+		return errors.New("server.base_path 变更需要重启")
+	case current.Ingress.Path != next.Ingress.Path:
+		return errors.New("ingress.path 变更需要重启")
+	case current.Ingress.DenyPath != next.Ingress.DenyPath:
+		return errors.New("ingress.deny_path 变更需要重启")
+	case current.Ingress.Type != next.Ingress.Type:
+		return errors.New("ingress.type 变更需要重启")
+	case current.Metrics.Enabled != next.Metrics.Enabled:
+		return errors.New("metrics.enabled 变更需要重启")
+	case current.Metrics.Path != next.Metrics.Path:
+		return errors.New("metrics.path 变更需要重启")
+	}
+	return nil
+}
+
+// acquireRuntime 获取当前快照并增加引用计数。
+func (s *Server) acquireRuntime() *runtimeState {
+	for {
+		state := s.runtime.Load()
+		if state == nil {
+			return nil
+		}
+		state.refs.Add(1)
+		if s.runtime.Load() == state && !state.retired.Load() {
+			return state
+		}
+		state.release()
+	}
+}
+
+// releaseRuntime 释放快照引用；旧快照的最后一个引用负责关闭 decider。
+func (s *Server) releaseRuntime(state *runtimeState) {
+	if state != nil {
+		state.release()
+	}
+}
+
+// retire 标记快照退役，并在没有在途请求时关闭其 decider。
+func (r *runtimeState) retire() {
+	r.retired.Store(true)
+	if r.refs.Load() == 0 {
+		r.close()
+	}
+}
+
+// release 减少引用计数。
+func (r *runtimeState) release() {
+	if r.refs.Add(-1) == 0 && r.retired.Load() {
+		r.close()
+	}
+}
+
+// close 幂等关闭 decider。
+func (r *runtimeState) close() {
+	r.closeOnce.Do(func() {
+		if closer, ok := r.decider.(interface{ Close() error }); ok {
+			r.closeErr = closer.Close()
+		}
+	})
+}
+
+// Close 释放当前快照持有的资源。
+func (s *Server) Close() error {
+	state := s.runtime.Swap(nil)
+	if state == nil {
+		return nil
+	}
+	state.retire()
+	return state.closeErr
 }
 
 // Handler 返回鉴权端点的主路由。
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc(s.cfg.Ingress.Path, s.handleAuth)
-	mux.HandleFunc(s.cfg.Ingress.DenyPath, s.handleDeny)
-	mux.HandleFunc("/healthz", s.handleHealthz)
-	mux.HandleFunc("/readyz", s.handleReadyz)
+	mux.HandleFunc(s.route(s.cfg.Ingress.Path), s.handleAuth)
+	mux.HandleFunc(s.route(s.cfg.Ingress.DenyPath), s.handleDeny)
+	mux.HandleFunc(s.route("/healthz"), s.handleHealthz)
+	mux.HandleFunc(s.route("/readyz"), s.handleReadyz)
 	if s.cfg.Metrics.Enabled {
-		mux.HandleFunc(s.metricsPath, s.handleMetrics)
+		mux.HandleFunc(s.route(s.metricsPath), s.handleMetrics)
 	}
 
 	// 兜底路由：任何未声明的路径都返回 JSON 404，避免暴露 Go 默认的纯文本响应。
@@ -161,14 +331,19 @@ func (s *Server) Handler() http.Handler {
 // MetricsHandler 返回独立监听端口上的路由（健康检查 + 指标 + 版本信息）。
 func (s *Server) MetricsHandler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", s.handleHealthz)
-	mux.HandleFunc("/readyz", s.handleReadyz)
-	mux.HandleFunc("/version", s.handleVersion)
+	mux.HandleFunc(s.route("/healthz"), s.handleHealthz)
+	mux.HandleFunc(s.route("/readyz"), s.handleReadyz)
+	mux.HandleFunc(s.route("/version"), s.handleVersion)
 	if s.cfg.Metrics.Enabled {
-		mux.HandleFunc(s.metricsPath, s.handleMetrics)
+		mux.HandleFunc(s.route(s.metricsPath), s.handleMetrics)
 	}
 	mux.HandleFunc("/", s.handleNotFound)
 	return mux
+}
+
+// route 返回端点在当前部署前缀下的最终生效路径。
+func (s *Server) route(path string) string {
+	return config.JoinBasePath(s.cfg.Server.BasePath, path)
 }
 
 // metricsEndpointPath 推导指标暴露路径。
@@ -194,6 +369,11 @@ func metricsEndpointPath(opts Options) string {
 // 任一监听启动失败都会立即返回错误，避免「半个服务」上线。
 func (s *Server) Run(ctx context.Context) error {
 	handler := s.Handler()
+	state := s.runtime.Load()
+	deciderName := ""
+	if state != nil && state.decider != nil {
+		deciderName = state.decider.Name()
+	}
 
 	s.http = &http.Server{
 		Addr:              s.cfg.Server.Listen,
@@ -211,8 +391,11 @@ func (s *Server) Run(ctx context.Context) error {
 		return fmt.Errorf("鉴权端点监听 %s 失败：%w", s.http.Addr, err)
 	}
 	started++
-	s.logger().Info("鉴权端点已启动", "addr", s.http.Addr, "auth_path", s.cfg.Ingress.Path,
-		"decider", s.decider.Name(), "version", s.version)
+	s.logger().Info("鉴权端点已启动", "addr", s.http.Addr,
+		"base_path", s.cfg.Server.BasePath,
+		"auth_path", s.route(s.cfg.Ingress.Path),
+		"deny_path", s.route(s.cfg.Ingress.DenyPath),
+		"decider", deciderName, "version", s.version)
 	go func() { runErr <- s.serveHTTP(s.http, listener) }()
 
 	if addr := strings.TrimSpace(s.cfg.Server.MetricsListen); addr != "" {
@@ -289,6 +472,13 @@ func (s *Server) shutdown() {
 // 处理流程：还原原始请求 -> 执行校验链 -> 依据结论渲染响应。
 // 放行时不写响应体（仅 200 + 回传响应头），拦截时写 JSON 错误体。
 func (s *Server) handleAuth(rw http.ResponseWriter, r *http.Request) {
+	state := s.acquireRuntime()
+	if state == nil {
+		http.Error(rw, "服务正在关闭", http.StatusServiceUnavailable)
+		return
+	}
+	defer s.releaseRuntime(state)
+
 	startedAt := s.clock.Now()
 	requestID := core.NewRequestID(startedAt)
 
@@ -300,12 +490,40 @@ func (s *Server) handleAuth(rw http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// 需要读取请求体时，为连接设置读取超时（由 ingress.body.read_timeout 配置），
-	// 防止慢速请求体攻击长期占用连接；处理结束后立即清除该超时，
-	// 避免影响同一 keep-alive 连接上的后续请求。
-	if s.decider.NeedsBody() && s.cfg.Ingress.Body.ReadTimeout.Duration() > 0 {
+	raw, err := s.extract(r)
+	if err != nil {
+		// 还原失败属于客户端请求不可信（例如注入头缺失），按 400 处理。
+		s.accessLog().Warn("原始请求还原失败",
+			"request_id", requestID, "reason", err.Error(), "remote_addr", r.RemoteAddr)
+		s.metrics.IncRequest(siteName(rctx), core.VerdictBadRequest.String())
+		failed := &core.Result{
+			Verdict: core.VerdictBadRequest,
+			Message: "无法还原原始请求信息",
+			Err:     err,
+			Check:   "ingress",
+		}
+		detail := s.requestDetail(state, rctx, failed)
+		s.recordAudit(state, rctx, failed, detail, startedAt)
+		state.responder.Respond(rw, rctx, failed)
+		return
+	}
+	rctx.Raw = raw
+	// 站点解析（需求 R6）：在还原出真实 Host 之后、进入校验链之前完成，
+	// 使校验单元与日志 / 指标 / 封禁键都能拿到正确的站点归属。
+	rctx.Site = resolveSite(state, raw.Host)
+	if s.extractor != nil {
+		rctx.IngressType = s.extractor.IngressType()
+	}
+	// 站点级校验链可能需要不同的读体策略：必须在站点解析之后再判断。
+	// 需要读取请求体时，为连接设置读取超时，防止慢速请求体攻击长期占用连接；
+	// 处理结束后立即清除，避免影响同一 keep-alive 连接上的后续请求。
+	needsBody := state.decider.NeedsBody()
+	if siteBody, ok := state.decider.(core.SiteBodyDecider); ok {
+		needsBody = siteBody.NeedsBodyFor(rctx)
+	}
+	if needsBody && state.cfg.Ingress.Body.ReadTimeout.Duration() > 0 {
 		controller := http.NewResponseController(rw)
-		if err := controller.SetReadDeadline(startedAt.Add(s.cfg.Ingress.Body.ReadTimeout.Duration())); err != nil {
+		if err := controller.SetReadDeadline(startedAt.Add(state.cfg.Ingress.Body.ReadTimeout.Duration())); err != nil {
 			// 部分连接类型不支持设置读取超时（例如特定 HTTP/2 场景），仅记录不阻断。
 			s.logger().Debug("无法设置请求体读取超时", "request_id", requestID, "错误", err)
 		}
@@ -314,28 +532,6 @@ func (s *Server) handleAuth(rw http.ResponseWriter, r *http.Request) {
 			_ = controller.SetReadDeadline(time.Time{})
 		}()
 	}
-
-	raw, err := s.extract(r)
-	if err != nil {
-		// 还原失败属于客户端请求不可信（例如注入头缺失），按 400 处理。
-		s.accessLog().Warn("原始请求还原失败",
-			"request_id", requestID, "reason", err.Error(), "remote_addr", r.RemoteAddr)
-		s.metrics.IncRequest(siteName(rctx), core.VerdictBadRequest.String())
-		s.responder.Respond(rw, rctx, &core.Result{
-			Verdict: core.VerdictBadRequest,
-			Message: "无法还原原始请求信息",
-			Err:     err,
-			Check:   "ingress",
-		})
-		return
-	}
-	rctx.Raw = raw
-	// 站点解析（需求 R6）：在还原出真实 Host 之后、进入校验链之前完成，
-	// 使校验单元与日志 / 指标 / 封禁键都能拿到正确的站点归属。
-	rctx.Site = s.resolveSite(raw.Host)
-	if s.extractor != nil {
-		rctx.IngressType = s.extractor.IngressType()
-	}
 	// 原始请求体的关闭责任在 HTTP 处理层（可能对应网络连接或落盘临时文件）。
 	if raw.Body != nil {
 		defer func() {
@@ -343,7 +539,7 @@ func (s *Server) handleAuth(rw http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
-	result := s.decider.Decide(r.Context(), rctx)
+	result := state.decider.Decide(r.Context(), rctx)
 	if result == nil {
 		result = &core.Result{Verdict: core.VerdictAllow}
 	}
@@ -359,11 +555,25 @@ func (s *Server) handleAuth(rw http.ResponseWriter, r *http.Request) {
 		s.alerts.Notify(result.Alerts)
 	}
 
-	s.recordAccess(rctx, result, startedAt)
+	detail := s.requestDetail(state, rctx, result)
+	s.recordAccess(state, rctx, result, detail, startedAt)
 	s.metrics.IncRequest(siteName(rctx), result.Verdict.String())
+	s.recordAudit(state, rctx, result, detail, startedAt)
 
-	if result.Verdict == core.VerdictAllow || result.Verdict == core.VerdictObserve {
+	// 蜜罐命中：鉴权端点只回传「需要渲染」的元数据，最终伪造响应由
+	// /waf/deny 在三个代理通道上统一生成。这样 Traefik（只能拿到状态码）、
+	// Nginx auth_request（丢弃子请求响应体）和 OpenResty 可以共用同一套
+	// 规则匹配与响应渲染逻辑，避免每个代理各自维护一份蜜罐正文。
+	if result.Verdict == core.VerdictHoneypot {
+		s.respondHoneypotMetadata(rw, rctx, result, requestID)
+		return
+	}
+
+	if (result.Verdict == core.VerdictAllow || result.Verdict == core.VerdictObserve) && result.Response == nil {
 		// 放行：显式回 200 并携带回传响应头，代理据此继续转发业务请求。
+		for name, value := range result.Headers {
+			rw.Header().Set(name, value)
+		}
 		rw.Header().Set(core.HeaderVerdict, result.Verdict.String())
 		rw.Header().Set(core.HeaderRequestID, requestID)
 		rw.Header().Set(core.HeaderCode, "WAF_ALLOW")
@@ -374,17 +584,138 @@ func (s *Server) handleAuth(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.responder.Respond(rw, rctx, result)
+	state.responder.Respond(rw, rctx, result)
 }
 
-// handleDeny 是 JSON 错误体渲染端点，供 Traefik errors 中间件回源调用。
+// respondHoneypotMetadata 写出蜜罐命中的控制响应。
 //
-// 该端点幂等且无副作用：仅依据查询参数渲染错误体，便于排障时直接 curl 自检。
+// 状态码固定 403：这是 Nginx 原生 auth_request 唯一可靠透传的失败状态，
+// 同时也能被 Traefik errors 与 OpenResty 直接识别。规则真正要返回的
+// 200/404/500 等状态由 /waf/deny 渲染端点决定。
+func (s *Server) respondHoneypotMetadata(rw http.ResponseWriter, rctx *core.RequestContext,
+	result *core.Result, requestID string) {
+	headers := rw.Header()
+	headers.Set("Cache-Control", "no-store")
+	headers.Set(core.HeaderVerdict, core.VerdictHoneypot.String())
+	headers.Set(core.HeaderCode, config.CodeHoneypot)
+	headers.Set(core.HeaderRequestID, requestID)
+	if s.version != "" {
+		headers.Set(core.HeaderVersion, s.version)
+	}
+	if rctx != nil && rctx.Site != nil {
+		headers.Set("X-WAF-Site", rctx.Site.Name)
+	}
+	if ruleID := firstResultRuleID(result); ruleID != "" {
+		headers.Set(core.HeaderRuleID, ruleID)
+	}
+	if target := core.ResultTarget(result); target != "" {
+		headers.Set(core.HeaderTarget, target)
+	}
+	if scope := core.ResultBanScope(result); scope != "" {
+		headers.Set(core.HeaderBanScope, scope)
+	}
+	rw.WriteHeader(http.StatusForbidden)
+}
+
+// handleDeny 是最终响应渲染端点，供 Traefik errors、Nginx error_page 与
+// OpenResty /__waf_deny 回源调用。
+//
+// 普通拦截返回 JSON 错误体；蜜罐命中则按原始请求重新匹配规则，返回规则
+// 定义的任意状态码、响应头与正文。该端点幂等且无副作用，便于直接 curl 自检。
 func (s *Server) handleDeny(rw http.ResponseWriter, r *http.Request) {
+	state := s.acquireRuntime()
+	if state == nil {
+		http.Error(rw, "服务正在关闭", http.StatusServiceUnavailable)
+		return
+	}
+	defer s.releaseRuntime(state)
+
 	s.metrics.IncDenyRender()
-	code := r.URL.Query().Get("code")
+	code := strings.TrimSpace(r.URL.Query().Get("code"))
+	if code == "" {
+		// Nginx / OpenResty 可以直接回传 X-WAF-Code；Traefik errors 只能
+		// 提供数字状态码，因此这里同时接受查询参数与响应头两种来源。
+		code = strings.TrimSpace(r.Header.Get(core.HeaderCode))
+	}
 	requestID := r.URL.Query().Get("request_id")
-	s.responder.Render(rw, requestID, code)
+	if requestID == "" {
+		requestID = r.Header.Get(core.HeaderRequestID)
+	}
+	target := strings.TrimSpace(r.URL.Query().Get("target"))
+	if target == "" {
+		target = strings.TrimSpace(r.Header.Get(core.HeaderTarget))
+	}
+	banScope := strings.TrimSpace(r.URL.Query().Get("ban_scope"))
+	if banScope == "" {
+		banScope = strings.TrimSpace(r.Header.Get(core.HeaderBanScope))
+	}
+	uri := strings.TrimSpace(r.URL.Query().Get("uri"))
+	if uri == "" {
+		uri = strings.TrimSpace(r.Header.Get("X-Forwarded-Uri"))
+	}
+	if uri == "" {
+		uri = strings.TrimSpace(r.Header.Get("X-Original-URI"))
+	}
+	if s.renderHoneypot(state, rw, r, code, requestID) {
+		return
+	}
+	state.responder.Render(rw, requestID, code, responder.RenderMetadata{
+		Target:   target,
+		BanScope: banScope,
+		URI:      uri,
+	})
+}
+
+// renderHoneypot 尝试把本次渲染回源识别为蜜罐命中。
+//
+// 触发条件：
+//   - Nginx / OpenResty 明确传入 WAF_HONEYPOT；
+//   - Traefik errors 只能传数字状态码，因此 403（以及可选的 418 哨兵）
+//     也需要尝试一次蜜罐重匹配；
+//   - 其它明确的拦截码（WAF_BLOCKED 等）不再重匹配，避免误把普通拦截
+//     渲染成诱饵页面。
+func (s *Server) renderHoneypot(state *runtimeState, rw http.ResponseWriter,
+	r *http.Request, code, requestID string) bool {
+	if !honeypotRenderCode(code) {
+		return false
+	}
+	matcher, ok := state.decider.(core.HoneypotMatcher)
+	if !ok {
+		return false
+	}
+
+	raw, err := s.extract(r)
+	if err != nil {
+		s.accessLog().Warn("蜜罐渲染端点无法还原原始请求",
+			"request_id", requestID, "reason", err.Error())
+		return false
+	}
+	if requestID == "" {
+		requestID = core.NewRequestID(s.clock.Now())
+	}
+	rctx := core.NewRequestContext(requestID, s.clock.Now())
+	rctx.Raw = raw
+	rctx.Site = resolveSite(state, raw.Host)
+	if s.extractor != nil {
+		rctx.IngressType = s.extractor.IngressType()
+	}
+
+	result := matcher.MatchHoneypot(rctx)
+	if result == nil || result.Response == nil {
+		return false
+	}
+	state.responder.Respond(rw, rctx, result)
+	return true
+}
+
+// honeypotRenderCode 判断渲染端点是否应该尝试蜜罐匹配。
+func honeypotRenderCode(code string) bool {
+	switch code {
+	case "", config.CodeHoneypot, "403", "418":
+		return true
+	default:
+		return false
+	}
 }
 
 // handleHealthz 是存活探针：只要进程还在服务，就返回 200。
@@ -400,20 +731,34 @@ func (s *Server) handleHealthz(rw http.ResponseWriter, _ *http.Request) {
 // 当前阶段校验链与共享存储在启动时已完成装配，因此就绪等于存活；
 // 后续阶段若引入规则热加载与存储健康检查，将在此处补充判定。
 func (s *Server) handleReadyz(rw http.ResponseWriter, _ *http.Request) {
+	state := s.acquireRuntime()
+	if state == nil {
+		http.Error(rw, "服务正在关闭", http.StatusServiceUnavailable)
+		return
+	}
+	defer s.releaseRuntime(state)
+
 	s.writeJSON(rw, http.StatusOK, map[string]any{
 		"status":     "ready",
 		"version":    s.version,
 		"uptime":     s.clock.Since(s.startedAt).String(),
-		"decider":    s.decider.Name(),
-		"needs_body": s.decider.NeedsBody(),
+		"decider":    state.decider.Name(),
+		"needs_body": state.decider.NeedsBody(),
 	})
 }
 
 // handleVersion 返回版本信息，便于容器编排与运维快速确认构建版本。
 func (s *Server) handleVersion(rw http.ResponseWriter, _ *http.Request) {
+	state := s.acquireRuntime()
+	if state == nil {
+		http.Error(rw, "服务正在关闭", http.StatusServiceUnavailable)
+		return
+	}
+	defer s.releaseRuntime(state)
+
 	s.writeJSON(rw, http.StatusOK, map[string]any{
 		"version": s.version,
-		"decider": s.decider.Name(),
+		"decider": state.decider.Name(),
 	})
 }
 
@@ -434,10 +779,29 @@ func (s *Server) handleMetrics(rw http.ResponseWriter, r *http.Request) {
 
 // handleNotFound 是兜底路由：未知路径统一返回 JSON 404。
 func (s *Server) handleNotFound(rw http.ResponseWriter, r *http.Request) {
-	s.writeJSON(rw, http.StatusNotFound, map[string]any{
-		"code":    "WAF_NOT_FOUND",
-		"message": "请求的 WAF 端点不存在",
-		"path":    r.URL.Path,
+	state := s.acquireRuntime()
+	if state == nil {
+		http.Error(rw, "服务正在关闭", http.StatusServiceUnavailable)
+		return
+	}
+	defer s.releaseRuntime(state)
+
+	now := s.clock.Now()
+	rctx := core.NewRequestContext(core.NewRequestID(now), now)
+	// 404 也属于对外拦截响应，必须和鉴权拦截共用同一套渲染模板；
+	// 把路径放进请求上下文，模板即可通过 {{ .Path }} 输出实际访问的端点。
+	rctx.Raw.Path = r.URL.Path
+	rctx.Raw.URI = r.URL.RequestURI()
+	rctx.Raw.Method = r.Method
+	rctx.Raw.Host = r.Host
+	rctx.Raw.Proto = r.Proto
+	rctx.Raw.ClientIP = remoteIP(r.RemoteAddr)
+	rctx.Raw.ContentLength = r.ContentLength
+	rctx.Site = resolveSite(state, r.Host)
+
+	state.responder.Respond(rw, rctx, &core.Result{
+		Verdict: core.VerdictBlock,
+		Code:    config.CodeNotFound,
 	})
 }
 
@@ -457,10 +821,56 @@ func (s *Server) extract(r *http.Request) (*core.RawRequest, error) {
 	return directExtract(r)
 }
 
+// requestLogDetail 是一次拦截 / 拒绝场景的请求快照。
+//
+// 只在非放行场景采集请求参数，避免正常流量产生无意义的解析与日志体积。
+type requestLogDetail struct {
+	Capture  bool
+	Target   string
+	BanScope string
+	URI      string
+	Query    string
+	Params   string
+}
+
+// requestDetail 汇总目标、URI、查询串与脱敏参数；同一次请求只采集一次。
+func (s *Server) requestDetail(state *runtimeState, rctx *core.RequestContext,
+	result *core.Result) requestLogDetail {
+	detail := requestLogDetail{
+		Target:   core.ResultTarget(result),
+		BanScope: core.ResultBanScope(result),
+	}
+	if result != nil && detail.Target == "" {
+		detail.Target = result.Check
+	}
+	if rctx == nil || rctx.Raw == nil {
+		return detail
+	}
+	detail.URI = rctx.Raw.URI
+	if detail.URI == "" {
+		detail.URI = rctx.Raw.Path
+		if rctx.Raw.RawQuery != "" {
+			detail.URI += "?" + rctx.Raw.RawQuery
+		}
+	}
+	detail.Query = rctx.Raw.RawQuery
+	detail.Capture = result != nil && (result.Verdict != core.VerdictAllow || result.WouldBlock || result.Err != nil)
+	if !detail.Capture {
+		return detail
+	}
+	maxBytes := int64(0)
+	if state != nil && state.cfg != nil {
+		maxBytes = state.cfg.Logging.Access.MaxBodySnippetBytes
+	}
+	detail.Params = core.CaptureRequestParams(rctx, maxBytes).JSON()
+	return detail
+}
+
 // recordAccess 写访问日志并记录耗时指标。
-func (s *Server) recordAccess(rctx *core.RequestContext, result *core.Result, startedAt time.Time) {
+func (s *Server) recordAccess(state *runtimeState, rctx *core.RequestContext,
+	result *core.Result, detail requestLogDetail, startedAt time.Time) {
 	elapsed := s.clock.Since(startedAt)
-	s.metrics.ObserveCheckDuration(s.decider.Name(), elapsed.Seconds())
+	s.metrics.ObserveCheckDuration(state.decider.Name(), elapsed.Seconds())
 
 	attributes := []any{
 		"request_id", rctx.RequestID,
@@ -479,6 +889,23 @@ func (s *Server) recordAccess(rctx *core.RequestContext, result *core.Result, st
 	}
 	if len(result.Findings) > 0 {
 		attributes = append(attributes, "rule_id", result.Findings[0].RuleID)
+	}
+	if detail.Capture {
+		if detail.Target != "" {
+			attributes = append(attributes, "target", detail.Target)
+		}
+		if detail.BanScope != "" {
+			attributes = append(attributes, "ban_scope", detail.BanScope)
+		}
+		if detail.URI != "" {
+			attributes = append(attributes, "uri", detail.URI)
+		}
+		if detail.Query != "" {
+			attributes = append(attributes, "query", detail.Query)
+		}
+		if detail.Params != "" {
+			attributes = append(attributes, "params", detail.Params)
+		}
 	}
 	if result.Err != nil {
 		attributes = append(attributes, "error", result.Err.Error())
@@ -504,19 +931,110 @@ func (s *Server) recordAccess(rctx *core.RequestContext, result *core.Result, st
 		// 校验单元异常优先于放行：失败开放虽然放过了请求，但必须留下 warn 级痕迹。
 		s.accessLog().Warn("校验单元异常", attributes...)
 	case result.Verdict == core.VerdictAllow:
-		s.recordAllow(attributes)
+		s.recordAllow(state, attributes)
 	case result.Verdict == core.VerdictObserve && result.WouldBlock:
 		// 观察模式且「本应拦截」：用 warn 级而不是 info 级。
 		// 原因：这份清单会被用来决定「能否切到 on 模式」，属于必须被看到的运营信号。
 		s.accessLog().Warn("旁路观察：本次请求本应被拦截", attributes...)
 	case result.Verdict == core.VerdictObserve:
 		s.accessLog().Info("命中规则（观察模式）", attributes...)
+	case result.Verdict == core.VerdictHoneypot:
+		s.accessLog().Info("命中蜜罐规则", attributes...)
 	default:
 		s.accessLog().Info("请求拦截", attributes...)
 	}
 }
 
-// accessAction 把判定结果归一为稳定的 action 取值（allow / block / observe / error）。
+// recordAudit 把请求结论投递给审计入口。
+//
+// 审计写入实现必须非阻塞；这里不检查返回值，也不能因审计失败改变响应。
+func (s *Server) recordAudit(state *runtimeState, rctx *core.RequestContext,
+	result *core.Result, detail requestLogDetail, startedAt time.Time) {
+	if result == nil || s.audit == nil {
+		return
+	}
+	entry := core.AuditEntry{
+		RequestID:  rctx.RequestID,
+		ReceivedAt: startedAt,
+		Site:       siteName(rctx),
+		Verdict:    result.Verdict.String(),
+		Action:     accessAction(result),
+		HTTPStatus: auditHTTPStatus(state, result),
+		Code:       auditCode(result),
+		Check:      result.Check,
+		Score:      result.Score,
+		Duration:   s.clock.Since(startedAt),
+		WouldBlock: result.WouldBlock,
+		Findings:   append([]core.Finding(nil), result.Findings...),
+	}
+	if detail.Capture {
+		entry.Target = detail.Target
+		entry.BanScope = detail.BanScope
+		entry.URI = detail.URI
+		entry.Query = detail.Query
+		entry.Params = detail.Params
+	}
+	if result.Err != nil {
+		entry.Error = result.Err.Error()
+	}
+	if result.Response != nil {
+		entry.HTTPStatus = result.Response.Status
+	}
+	if len(result.Findings) > 0 {
+		entry.RuleID = result.Findings[0].RuleID
+	}
+	if rctx.Raw != nil {
+		entry.ClientIP = rctx.Raw.ClientIP
+		entry.Method = rctx.Raw.Method
+		entry.Host = rctx.Raw.Host
+		entry.Path = auditPath(rctx.Raw.Path)
+	}
+	s.audit.Record(entry)
+}
+
+// auditCode 返回审计记录中的对外错误码。
+func auditCode(result *core.Result) string {
+	if result == nil {
+		return ""
+	}
+	if result.Code != "" {
+		return result.Code
+	}
+	if result.Verdict == core.VerdictAllow || result.Verdict == core.VerdictObserve {
+		return "WAF_ALLOW"
+	}
+	return responder.CodeForVerdict(result.Verdict)
+}
+
+// auditHTTPStatus 计算审计记录中的对外状态码。
+func auditHTTPStatus(state *runtimeState, result *core.Result) int {
+	if result == nil {
+		return http.StatusOK
+	}
+	if result.Response != nil {
+		return result.Response.Status
+	}
+	if result.Verdict == core.VerdictAllow || result.Verdict == core.VerdictObserve {
+		return http.StatusOK
+	}
+	if result.Verdict == core.VerdictHoneypot {
+		return http.StatusForbidden
+	}
+	if state != nil && state.cfg.Ingress.Type == config.IngressTypeNginxAuthOnly {
+		return http.StatusForbidden
+	}
+	return responder.StatusForCode(auditCode(result))
+}
+
+// auditPath 去除查询串，避免敏感参数进入审计数据库。
+func auditPath(path string) string {
+	if index := strings.IndexByte(path, '?'); index >= 0 {
+		return path[:index]
+	}
+	return path
+}
+
+// accessAction 把判定结果归一为稳定的 action 取值（allow / block / observe / honeypot / error）。
 //
 // 之所以单独输出 action 而不是让消费方根据 verdict 自行推导：
 //  1. verdict 的字符串取值未来可能扩展（例如新增 "challenge"），报表侧不应随之改动；
@@ -532,6 +1050,8 @@ func accessAction(result *core.Result) string {
 		return "allow"
 	case result.Verdict == core.VerdictObserve:
 		return "observe"
+	case result.Verdict == core.VerdictHoneypot:
+		return "honeypot"
 	default:
 		return "block"
 	}
@@ -547,8 +1067,8 @@ func accessAction(result *core.Result) string {
 //   - off：完全不记录放行，只保留拦截 / 观察 / 异常记录。
 //
 // 运行期仍做一次兜底：空值或非法值一律按 info 处理，避免出现「静默不留痕」。
-func (s *Server) recordAllow(attributes []any) {
-	switch strings.ToLower(strings.TrimSpace(s.cfg.Logging.Access.AllowLevel)) {
+func (s *Server) recordAllow(state *runtimeState, attributes []any) {
+	switch strings.ToLower(strings.TrimSpace(state.cfg.Logging.Access.AllowLevel)) {
 	case config.AccessAllowLevelOff:
 		// 显式关闭：跳过放行记录；拦截 / 观察 / 异常的记录不受任何影响。
 		return
@@ -557,6 +1077,14 @@ func (s *Server) recordAllow(attributes []any) {
 	default:
 		s.accessLog().Info("请求通过", attributes...)
 	}
+}
+
+// firstResultRuleID 返回结论中首个命中的规则标识；无命中时返回空串。
+func firstResultRuleID(result *core.Result) string {
+	if result == nil || len(result.Findings) == 0 {
+		return ""
+	}
+	return result.Findings[0].RuleID
 }
 
 // siteName 返回站点名，未解析时返回默认站点名。
@@ -571,11 +1099,11 @@ func siteName(rctx *core.RequestContext) string {
 //
 // 未装配站点解析器时回落到「匹配全部 Host 的默认站点」，
 // 保证 rctx.Site 永不为 nil（日志、指标标签与封禁键都依赖站点名）。
-func (s *Server) resolveSite(host string) *core.Site {
-	if s.sites == nil {
+func resolveSite(state *runtimeState, host string) *core.Site {
+	if state == nil || state.sites == nil {
 		return &core.Site{Name: core.DefaultSiteName, Hosts: []string{"*"}}
 	}
-	return s.sites.Resolve(host)
+	return state.sites.Resolve(host)
 }
 
 // logger 返回系统日志器；未注入时返回丢弃输出的兜底日志器。

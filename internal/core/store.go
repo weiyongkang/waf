@@ -33,9 +33,19 @@ type Store interface {
 	// Ban 把 key 加入封禁名单并设置 TTL；ttl <= 0 时由调用方使用 ban.default_ttl 兜底。
 	// TTL 到期后名单自动失效，无需额外的解封任务。
 	//
+	// 语义说明：Ban 是「强制写入」——已存在同名记录时会覆盖原因与到期时间，
+	// 供运维手工封禁（需要显式续期）使用。自动封禁请使用 BanIfAbsent。
+	//
 	// reason 会随名单项一并保存，供 `waf ban list` 与排障使用；
 	// 之所以把 reason 放进接口而不是让实现自行拼装：原因文本只有调用方（校验单元）知道。
 	Ban(ctx context.Context, key string, ttl time.Duration, reason string) error
+
+	// BanIfAbsent 仅在 key 不存在或已过期时写入封禁记录，返回是否实际创建。
+	//
+	// 这是自动封禁的唯一正确写入方式：封禁到期时间必须在「首次封禁」时确定，
+	// 后续相同来源的命中不能刷新 TTL，否则持续攻击会让封禁永不解除。
+	// 实现必须保证判断与写入的原子性（Redis 使用 SET NX，内存实现持分片锁）。
+	BanIfAbsent(ctx context.Context, key string, ttl time.Duration, reason string) (created bool, err error)
 
 	// IsBanned 查询封禁状态与剩余时长。
 	IsBanned(ctx context.Context, key string) (banned bool, remaining time.Duration, err error)
@@ -56,8 +66,47 @@ type BanEntry struct {
 	Key string
 	// Reason 是封禁原因。
 	Reason string
+	// Scope 是封禁维度。
+	Scope string
+	// RuleID / Check 是触发封禁的规则与校验单元。
+	RuleID string
+	Check  string
+	// Target 是触发封禁的检测目标。
+	Target string
+	// URI / Query / Params 是触发封禁时的请求快照。
+	URI        string
+	Query      string
+	ParamsJSON string
 	// TTL 是剩余封禁时长。
 	TTL time.Duration
+	// BannedAt 是首次封禁时间；零值表示底层记录未提供该信息。
+	BannedAt time.Time
+	// ExpireAt 是封禁到期时间；零值表示永不过期或底层记录未提供该信息。
+	ExpireAt time.Time
+}
+
+// BanDetail 是自动封禁的请求上下文快照。
+//
+// 该结构只由 internal/ban 在落地 BanRequest 时填充；人工封禁等没有请求上下文的
+// 场景允许为零值。
+type BanDetail struct {
+	RequestID  string
+	Check      string
+	RuleID     string
+	Target     string
+	Scope      string
+	URI        string
+	Query      string
+	ParamsJSON string
+}
+
+// BanDetailStore 是可选扩展接口：支持结构化保存封禁上下文的存储实现。
+//
+// 不直接扩展 Store，是为了保持 Redis / memory / file 等实现的兼容性；
+// 不支持该接口时，ban.Manager 自动回退到普通 Ban / BanIfAbsent。
+type BanDetailStore interface {
+	BanWithDetail(ctx context.Context, key string, ttl time.Duration, reason string, detail BanDetail) error
+	BanIfAbsentWithDetail(ctx context.Context, key string, ttl time.Duration, reason string, detail BanDetail) (bool, error)
 }
 
 // StoreResolver 按配置中的存储名解析已构建好的 Store 实例。

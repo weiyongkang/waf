@@ -399,9 +399,9 @@ http:
 - `forwardBody: true` 让 Traefik 把原始请求体随鉴权子请求送出，并正确设置 `Content-Length`。
 - **按需开启**：只为需要体检测的路由挂载体检测中间件；纯静态/下载类路由使用不带 `forwardBody` 的中间件。
 - Traefik 会在转发前缓冲请求体，`maxBodySize` 直接决定内存占用与保护边界。
-- Traefik 的 `forwardAuth` **不会**把鉴权响应体传给客户端，因此错误体必须由 `errors` 中间件回源 `/waf/deny` 渲染（见 §4.3）。
+- Traefik 的 `forwardAuth` **不会**把鉴权响应体传给客户端，因此 JSON 错误体与蜜罐页面都必须由 `errors` 中间件回源 `/waf/deny` 渲染（见 §4.3）。
 - **中间件顺序（易踩坑）**：Traefik 采用 alice 风格的链式包装，`middlewares` 列表中靠前的中间件位于链的**外层**（`New(m1, m2).Then(app) == m1(m2(app))`）。`forwardAuth` 判定失败时直接 `WriteHeader` 返回、**不会调用下游**，因此只有把 `errors` 写在 `waf-auth` 之前，它才能观察到 403/429 并回源渲染 JSON；顺序写反的表现是「JSON 错误体丢失，只剩 Traefik 默认错误页」。
-- `errors` 中间件的 `query` 模板拿不到鉴权响应头（Traefik 没有 `auth_request_set` 等价能力），因此只能把 `{status}` 当 `code` 传给 `/waf/deny`，由渲染端点按状态码反推错误码（§4.3.3 的降级方案）。
+- `errors` 中间件的 `query` 模板拿不到鉴权响应头（Traefik 没有 `auth_request_set` 等价能力），因此只能把 `{status}` 当 `code` 传给 `/waf/deny`；对 403 由渲染端点再执行一次蜜罐重匹配，命中则返回规则页面，未命中才按状态码反推错误码（§4.3.3）。
 
 ### 3.4 Nginx：OpenResty 子请求转发（目标形态）
 
@@ -677,6 +677,8 @@ responder:
 | `X-WAF-Request-Id` | 请求 ID | 是 | 与访问日志 `request_id` 一致，用于排障关联 |
 | `X-WAF-Verdict` | `BLOCKED` / `RATE_LIMITED` / ... | 是 | 人类可读判定 |
 | `X-WAF-Rule-Id` | 规则 ID | 否 | 仅 `responder.include_details: true` 时返回 |
+| `X-WAF-Target` | 检测目标 | 否 | 例如 `ARGS:id`、`REQUEST_URI`、`client_ip+path` |
+| `X-WAF-Ban-Scope` | 封禁维度 | 否 | 封禁名单 / 自动封禁命中时返回 |
 | `X-WAF-Retry-After` | 秒 | 否 | 限速场景 |
 
 > Nginx 变量名转换规则：`X-WAF-Code` -> `$upstream_http_x_waf_code`（全小写、`-` 转 `_`）。
@@ -744,23 +746,25 @@ http:
 
 **`request_id` 关联（最近拦截事件缓存）**：`errors` 中间件拿不到鉴权响应头，因此 WAF 在拦截时把 `{client_ip, method, path} -> request_id` 写入本地 TTL 缓存（`responder.recent_block_ttl`，默认 `10s`）；`/waf/deny` 按同样维度反查真实 `request_id`，未命中则新生成并在响应中标注 `"correlated": false`。
 
+**蜜罐重匹配**：WAF 对蜜罐统一返回 403；`errors` 回源后，`/waf/deny` 读取 `X-Forwarded-Uri` / `X-Forwarded-Method`，按同一份蜜罐规则重新匹配。命中时返回规则自己的状态码（包括 200）、响应头与正文；未命中时继续走普通 JSON 错误体。因此 Traefik 不需要自定义插件，也不需要把正文塞进响应头。
+
 #### 4.3.4 渲染端点 `GET /waf/deny`
 
 | 项 | 说明 |
 | --- | --- |
-| 入参 | `code` / `request_id`（Nginx 写法 C）；`status`（Traefik `errors` 中间件） |
-| 输出 | 与 §4.2 完全一致的 JSON；`Content-Type: application/json; charset=utf-8` |
-| 状态码 | `WAF_BLOCKED`->403、`WAF_RATE_LIMITED`->429、`WAF_UNAUTHORIZED`->401、`WAF_BAD_REQUEST`->400、`WAF_UNAVAILABLE`->503 |
-| 幂等性 | 无副作用、纯渲染；不写访问日志（避免重复计数），仅累加 `waf_deny_render_total` |
-| 安全 | 不回显任意输入；`include_details: false` 时不返回规则详情 |
+| 入参 | `code` / `request_id`（Nginx、OpenResty）；`{status}`（Traefik `errors` 中间件）；原始请求信息通过 `X-Forwarded-*` / `X-Original-*` 传递 |
+| 输出 | 普通拦截为 §4.2 的 JSON；蜜罐命中为规则定义的任意响应（状态码 / 响应头 / 正文） |
+| 状态码 | 普通拦截：`WAF_BLOCKED`->403、`WAF_RATE_LIMITED`->429、`WAF_UNAUTHORIZED`->401、`WAF_BAD_REQUEST`->400、`WAF_UNAVAILABLE`->503；蜜罐：规则 `status` |
+| 幂等性 | 无副作用、纯渲染；不写访问日志（避免重复计数），仅累加 `waf_deny_render_total`；蜜罐渲染不产生评分 / 告警 / 封禁 |
+| 安全 | 不回显任意输入；`include_details: false` 时不返回规则详情；只对 `WAF_HONEYPOT`、403、418 或空 code 尝试蜜罐重匹配 |
 
 #### 4.3.5 各通道能力对照
 
-| 通道 | 请求体 | 错误体送达 | 最终对外状态码 | 复杂度 |
+| 通道 | 请求体 | 错误体 / 蜜罐页面送达 | 最终对外状态码 | 复杂度 |
 | --- | --- | --- | --- | --- |
-| Nginx + OpenResty（Lua） | 是 | Lua 直接回写 `res.body` | 原样透传（可 429） | 低 |
-| Nginx 原生 `auth_request` | 否 | `error_page` + `auth_request_set` 渲染（写法 B/C） | 统一 403，由渲染 location 决定 | 中 |
-| Traefik + `forwardBody` | 是 | `errors` 中间件 -> `/waf/deny` | 原样透传 | 中 |
+| Nginx + OpenResty（Lua） | 是 | Lua 回源 `/__waf_deny` -> `/waf/deny` | 由渲染端点决定（可 200/429） | 低 |
+| Nginx 原生 `auth_request` | 否 | `error_page` -> `/waf/deny` | 由渲染端点决定（可 200/429） | 中 |
+| Traefik + `forwardBody` | 是 | `errors` 中间件 -> `/waf/deny` | 由渲染端点决定（可 200） | 中 |
 | Nginx 原生 + `mirror`（兜底） | 异步 | 不可送达 | - | - |
 
 ---

@@ -17,7 +17,8 @@ const DefaultConfigPath = "/etc/waf/waf.yaml"
 
 // Options 是配置加载的输入参数。
 type Options struct {
-	// ConfigFiles 是按顺序生效的配置文件路径列表（后者覆盖前者）。
+	// ConfigFiles 是按顺序生效的配置文件/目录路径列表（后者覆盖前者）。
+	// 目录会按文件名字典序展开其中的 .yaml/.yml/.json 文件。
 	// 通常由 FlagSet.ConfigFiles() 提供。
 	ConfigFiles []string
 	// CLI 是已解析完成的 CLI 通道；为 nil 时跳过 CLI 叠加。
@@ -62,8 +63,14 @@ func Load(opts Options) (*Resolved, error) {
 	}
 	limit := limitFromTree(tree, "limits.max_config_file_bytes", 1<<20)
 
-	loadedFiles := make([]string, 0, len(files))
-	for _, path := range files {
+	inputs := files
+	expandedFiles, configDirs, err := expandConfigInputs(inputs)
+	if err != nil {
+		return nil, err
+	}
+
+	loadedFiles := make([]string, 0, len(expandedFiles))
+	for _, path := range expandedFiles {
 		fileTree, err := loadConfigFile(path, limit)
 		if err != nil {
 			return nil, err
@@ -98,10 +105,12 @@ func Load(opts Options) (*Resolved, error) {
 	}
 
 	return &Resolved{
-		Config:     cfg,
-		Origins:    origins,
-		Files:      loadedFiles,
-		TotalItems: len(sch.leaves),
+		Config:       cfg,
+		Origins:      origins,
+		Files:        loadedFiles,
+		ConfigInputs: inputs,
+		ConfigDirs:   configDirs,
+		TotalItems:   len(sch.leaves),
 	}, nil
 }
 

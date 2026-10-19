@@ -329,6 +329,17 @@ func (s *fallbackStore) Ban(ctx context.Context, key string, ttl time.Duration, 
 	return s.local.Ban(ctx, key, ttl, reason)
 }
 
+// BanIfAbsent 优先在共享后端原子创建；故障时降级到本地实现。
+func (s *fallbackStore) BanIfAbsent(ctx context.Context, key string, ttl time.Duration, reason string) (bool, error) {
+	created, err := s.primary.BanIfAbsent(ctx, key, ttl, reason)
+	if err == nil {
+		s.tracker.ok()
+		return created, nil
+	}
+	s.tracker.fail(err)
+	return s.local.BanIfAbsent(ctx, key, ttl, reason)
+}
+
 // IsBanned 优先查共享后端；故障时退化为本地名单查询。
 func (s *fallbackStore) IsBanned(ctx context.Context, key string) (bool, time.Duration, error) {
 	banned, remaining, err := s.primary.IsBanned(ctx, key)
@@ -426,6 +437,17 @@ func (s *failOpenStore) Ban(ctx context.Context, key string, ttl time.Duration, 
 	}
 	s.tracker.ok()
 	return nil
+}
+
+// BanIfAbsent 故障时丢弃封禁动作，并返回 created=false。
+func (s *failOpenStore) BanIfAbsent(ctx context.Context, key string, ttl time.Duration, reason string) (bool, error) {
+	created, err := s.primary.BanIfAbsent(ctx, key, ttl, reason)
+	if err != nil {
+		s.tracker.fail(err)
+		return false, nil
+	}
+	s.tracker.ok()
+	return created, nil
 }
 
 // IsBanned 故障时返回「未封禁」。

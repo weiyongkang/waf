@@ -179,9 +179,37 @@ func (m *Manager) banOne(ctx context.Context, store core.Store, rctx *core.Reque
 	if reason == "" {
 		reason = fmt.Sprintf("规则 %s 触发内部封禁", request.RuleID)
 	}
+	detail := m.banDetail(rctx, request, string(scope))
 
-	if err := store.Ban(ctx, key, ttl, reason); err != nil {
-		return fmt.Errorf("写入封禁名单失败（key=%s）：%w", key, err)
+	created := true
+	if m.cfg.RenewOnRepeat {
+		if err := m.banWithDetail(ctx, store, key, ttl, reason, detail); err != nil {
+			return fmt.Errorf("写入封禁名单失败（key=%s）：%w", key, err)
+		}
+	} else {
+		var err error
+		created, err = m.banIfAbsentWithDetail(ctx, store, key, ttl, reason, detail)
+		if err != nil {
+			return fmt.Errorf("写入封禁名单失败（key=%s）：%w", key, err)
+		}
+	}
+	if !created {
+		// 已存在有效封禁：保持首次封禁时确定的到期时间，不刷新 TTL。
+		// 这里只记录 debug，避免持续攻击把系统日志刷满。
+		if m.logger != nil {
+			m.logger.Debug("来源已在封禁名单中，保持原到期时间",
+				"key", key,
+				"rule_id", request.RuleID,
+				"check", detail.Check,
+				"target", detail.Target,
+				"ban_scope", string(scope),
+				"request_id", requestIDOf(rctx),
+				"uri", detail.URI,
+				"query", detail.Query,
+				"params", detail.ParamsJSON,
+			)
+		}
+		return nil
 	}
 
 	// 指标按实际维度统计：多维度部署时需要区分「按 IP 封」与「按 IP+路径 封」的量级。
@@ -192,12 +220,64 @@ func (m *Manager) banOne(ctx context.Context, store core.Store, rctx *core.Reque
 			"ttl", ttl.String(),
 			"reason", reason,
 			"rule_id", request.RuleID,
+			"check", detail.Check,
+			"target", detail.Target,
 			"ban_scope", string(scope),
 			"escalate_count", escalateCount,
 			"request_id", requestIDOf(rctx),
+			"uri", detail.URI,
+			"query", detail.Query,
+			"params", detail.ParamsJSON,
 		)
 	}
 	return nil
+}
+
+// banWithDetail 优先使用支持结构化上下文的存储实现，否则回退到普通 Ban。
+func (m *Manager) banWithDetail(ctx context.Context, store core.Store, key string,
+	ttl time.Duration, reason string, detail core.BanDetail) error {
+	if detailed, ok := store.(core.BanDetailStore); ok {
+		return detailed.BanWithDetail(ctx, key, ttl, reason, detail)
+	}
+	return store.Ban(ctx, key, ttl, reason)
+}
+
+// banIfAbsentWithDetail 优先使用支持结构化上下文的存储实现，否则回退到普通 BanIfAbsent。
+func (m *Manager) banIfAbsentWithDetail(ctx context.Context, store core.Store, key string,
+	ttl time.Duration, reason string, detail core.BanDetail) (bool, error) {
+	if detailed, ok := store.(core.BanDetailStore); ok {
+		return detailed.BanIfAbsentWithDetail(ctx, key, ttl, reason, detail)
+	}
+	return store.BanIfAbsent(ctx, key, ttl, reason)
+}
+
+// banDetail 构造封禁请求上下文快照，供 SQLite 与系统日志使用。
+func (m *Manager) banDetail(rctx *core.RequestContext, request core.BanRequest, scope string) core.BanDetail {
+	detail := core.BanDetail{
+		Check:  request.Check,
+		RuleID: request.RuleID,
+		Target: request.Target,
+		Scope:  scope,
+	}
+	if request.Scope != "" && detail.Target == "" {
+		detail.Target = request.Scope
+	}
+	if rctx == nil {
+		return detail
+	}
+	detail.RequestID = rctx.RequestID
+	if rctx.Raw != nil {
+		detail.URI = rctx.Raw.URI
+		detail.Query = rctx.Raw.RawQuery
+		if detail.URI == "" {
+			detail.URI = rctx.Raw.Path
+			if rctx.Raw.RawQuery != "" {
+				detail.URI += "?" + rctx.Raw.RawQuery
+			}
+		}
+	}
+	detail.ParamsJSON = core.CaptureRequestParams(rctx, 0).JSON()
+	return detail
 }
 
 // resolveTTL 依据累进封禁配置计算最终时长。

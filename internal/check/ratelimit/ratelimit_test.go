@@ -52,6 +52,14 @@ func (s *recordingStore) Ban(_ context.Context, key string, ttl time.Duration, r
 	return nil
 }
 
+// BanIfAbsent 记录封禁条目并报告创建成功。
+func (s *recordingStore) BanIfAbsent(_ context.Context, key string, ttl time.Duration, reason string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.bans = append(s.bans, core.BanEntry{Key: key, TTL: ttl, Reason: reason})
+	return true, nil
+}
+
 // IsBanned 恒返回未封禁（本测试不覆盖查询路径）。
 func (s *recordingStore) IsBanned(context.Context, string) (bool, time.Duration, error) {
 	return false, 0, nil

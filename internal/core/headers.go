@@ -19,6 +19,10 @@ const (
 	HeaderCode = "X-WAF-Code"
 	// HeaderRuleID 回传命中的规则标识，便于排障与误报申诉。
 	HeaderRuleID = "X-WAF-Rule-Id"
+	// HeaderTarget 回传触发拦截的目标（例如 ARGS:id、REQUEST_URI、client_ip）。
+	HeaderTarget = "X-WAF-Target"
+	// HeaderBanScope 回传导致本次拦截的封禁维度（例如 client_ip、client_ip+path）。
+	HeaderBanScope = "X-WAF-Ban-Scope"
 	// HeaderVersion 回传 WAF 版本，便于确认线上运行的构建版本。
 	HeaderVersion = "X-WAF-Version"
 )

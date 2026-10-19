@@ -53,10 +53,13 @@ func TestResolveCode(t *testing.T) {
 //   - 回传 X-WAF-Code 响应头（供 Nginx auth_request_set 读取）；
 //   - 响应体为规范 JSON（验收项 A26 / A30）。
 func TestRenderWritesHeadersAndBody(t *testing.T) {
-	writer := New(Config{
+	writer, err := New(Config{
 		Messages: map[string]string{config.CodeRateLimited: "请求过于频繁"},
 		Version:  "test",
 	})
+	if err != nil {
+		t.Fatalf("构造响应渲染器失败：%v", err)
+	}
 
 	recorder := httptest.NewRecorder()
 	writer.Render(recorder, "01J8Z9Q2K7V4M3N5P6R8T1W0XY", "429")
@@ -92,15 +95,86 @@ func TestRenderWritesHeadersAndBody(t *testing.T) {
 	}
 }
 
+// TestRespondCarriesTargetAndBanScope 覆盖：普通拦截响应头与 JSON details
+// 都包含触发目标和封禁维度，URI 来自原始请求。
+func TestRespondCarriesTargetAndBanScope(t *testing.T) {
+	writer, err := New(Config{IncludeDetails: true})
+	if err != nil {
+		t.Fatalf("构造响应渲染器失败：%v", err)
+	}
+	rctx := core.NewRequestContext("REQ-TARGET", core.SystemClock{}.Now())
+	rctx.Raw.URI = "/admin?x=1"
+	result := core.NewResult("banlist", core.VerdictBlock)
+	finding := core.NewFinding("banlist", "internal_banlist", "封禁命中", core.SeverityHigh, 0)
+	finding.Data = map[string]string{
+		"target":    "client_ip+path",
+		"ban_scope": "client_ip+path",
+	}
+	result.AddFinding(finding)
+
+	recorder := httptest.NewRecorder()
+	writer.Respond(recorder, rctx, result)
+
+	if got := recorder.Header().Get(core.HeaderTarget); got != "client_ip+path" {
+		t.Fatalf("X-WAF-Target = %q", got)
+	}
+	if got := recorder.Header().Get(core.HeaderBanScope); got != "client_ip+path" {
+		t.Fatalf("X-WAF-Ban-Scope = %q", got)
+	}
+	var body ErrorBody
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("响应体不是合法 JSON：%v", err)
+	}
+	if body.Details == nil || body.Details.Target != "client_ip+path" ||
+		body.Details.BanScope != "client_ip+path" || body.Details.URI != "/admin?x=1" {
+		t.Fatalf("响应 details 上下文不完整：%+v", body.Details)
+	}
+}
+
+// TestRenderMetadataIsAvailableToTemplate 覆盖：渲染端点传入的目标、维度与 URI
+// 同时写入响应头和自定义模板。
+func TestRenderMetadataIsAvailableToTemplate(t *testing.T) {
+	writer, err := New(Config{
+		Template: `{"target":{{ .Target | json }},"ban_scope":{{ .BanScope | json }},` +
+			`"uri":{{ .URI | json }}}`,
+	})
+	if err != nil {
+		t.Fatalf("构造响应渲染器失败：%v", err)
+	}
+	recorder := httptest.NewRecorder()
+	writer.Render(recorder, "REQ-META", config.CodeBlocked, RenderMetadata{
+		Target:   "ARGS:id",
+		BanScope: "client_ip",
+		URI:      "/api/user?id=1",
+	})
+
+	if got := recorder.Header().Get(core.HeaderTarget); got != "ARGS:id" {
+		t.Fatalf("X-WAF-Target = %q", got)
+	}
+	if got := recorder.Header().Get(core.HeaderBanScope); got != "client_ip" {
+		t.Fatalf("X-WAF-Ban-Scope = %q", got)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("模板输出不是合法 JSON：%v（%s）", err, recorder.Body.String())
+	}
+	if body["target"] != "ARGS:id" || body["ban_scope"] != "client_ip" || body["uri"] != "/api/user?id=1" {
+		t.Fatalf("模板元数据不符：%#v", body)
+	}
+}
+
 // TestRespondForceHTTPStatus 验证 Nginx 原生 auth_request 通道下统一回 403 的行为。
 //
 // 原因（需求 R22）：auth_request 只透传 401/403，其它状态码会被改写成 500，
 // 因此该通道下必须统一回 403，真实语义由 X-WAF-Code 承载。
 func TestRespondForceHTTPStatus(t *testing.T) {
-	writer := New(Config{
+	writer, err := New(Config{
 		ForceHTTPStatus: http.StatusForbidden,
 		Version:         "test",
 	})
+	if err != nil {
+		t.Fatalf("构造响应渲染器失败：%v", err)
+	}
 
 	recorder := httptest.NewRecorder()
 	rctx := core.NewRequestContext("REQ-1", core.SystemClock{}.Now())
@@ -122,7 +196,10 @@ func TestRespondForceHTTPStatus(t *testing.T) {
 
 // TestRespondHidesDetailsByDefault 验证默认不向攻击者泄露检测细节。
 func TestRespondHidesDetailsByDefault(t *testing.T) {
-	writer := New(Config{Version: "test"})
+	writer, err := New(Config{Version: "test"})
+	if err != nil {
+		t.Fatalf("构造响应渲染器失败：%v", err)
+	}
 
 	recorder := httptest.NewRecorder()
 	result := &core.Result{Verdict: core.VerdictBlock, Check: "crs-header"}
@@ -140,5 +217,54 @@ func TestRespondHidesDetailsByDefault(t *testing.T) {
 	// 但响应头仍应回传规则标识，便于代理侧与运维排障。
 	if got := recorder.Header().Get(core.HeaderRuleID); got != "942100" {
 		t.Fatalf("X-WAF-Rule-Id = %q，期望 942100", got)
+	}
+}
+
+// TestRespondOverrideWritesCustomResponse 覆盖蜜罐直接响应：
+// 规则自带状态码 / Content-Type / Headers / Body，不能被全局 JSON 模板或
+// force_http_status 覆盖，同时仍需回传 WAF 审计头。
+func TestRespondOverrideWritesCustomResponse(t *testing.T) {
+	writer, err := New(Config{
+		ForceHTTPStatus: http.StatusForbidden,
+		Template:        `{"code":{{ .Code | json }}}`,
+		Version:         "test",
+	})
+	if err != nil {
+		t.Fatalf("构造响应渲染器失败：%v", err)
+	}
+
+	rctx := core.NewRequestContext("REQ-HONEYPOT", core.SystemClock{}.Now())
+	result := core.NewResult("honeypot", core.VerdictHoneypot).
+		AddFinding(core.NewFinding("honeypot", "honeypot:phpinfo", "蜜罐命中", core.SeverityHigh, 0)).
+		WithResponse(core.ResponseOverride{
+			Status:      http.StatusOK,
+			ContentType: "text/html; charset=utf-8",
+			Headers:     map[string]string{"Server": "Apache/2.4.59"},
+			Body:        "<h1>PHP Version 8.2.17</h1>",
+		})
+
+	recorder := httptest.NewRecorder()
+	writer.Respond(recorder, rctx, result)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("状态码 = %d，期望规则定义的 200", recorder.Code)
+	}
+	if got := recorder.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+		t.Fatalf("Content-Type = %q", got)
+	}
+	if got := recorder.Header().Get("Server"); got != "Apache/2.4.59" {
+		t.Fatalf("自定义响应头丢失：%q", got)
+	}
+	if recorder.Body.String() != "<h1>PHP Version 8.2.17</h1>" {
+		t.Fatalf("响应体被改写：%q", recorder.Body.String())
+	}
+	if got := recorder.Header().Get(core.HeaderCode); got != config.CodeHoneypot {
+		t.Fatalf("X-WAF-Code = %q，期望 %q", got, config.CodeHoneypot)
+	}
+	if got := recorder.Header().Get(core.HeaderVerdict); got != core.VerdictHoneypot.String() {
+		t.Fatalf("X-WAF-Verdict = %q，期望 honeypot", got)
+	}
+	if got := recorder.Header().Get(core.HeaderRuleID); got != "honeypot:phpinfo" {
+		t.Fatalf("X-WAF-Rule-Id = %q", got)
 	}
 }

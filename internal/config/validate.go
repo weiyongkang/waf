@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/weiyongkang/waf/internal/core"
+	"github.com/weiyongkang/waf/internal/netx"
+	"github.com/weiyongkang/waf/internal/vpatch"
 )
 
 // metricNamePattern 限定指标名前缀的合法字符集（与 Prometheus 指标名规范一致）。
@@ -72,8 +74,10 @@ func Validate(cfg *Config) error {
 	validateNotifiers(cfg, errs)
 	validateSites(cfg, errs)
 	validateMetrics(cfg, errs)
+	validateRouteCollisions(cfg, errs)
 	validateLimits(cfg, errs)
 	validateCache(cfg, errs)
+	validateDatabase(cfg, errs)
 
 	if len(errs.Problems) > 0 {
 		return errs
@@ -92,6 +96,26 @@ func validateVersion(cfg *Config, errs *ValidationError) {
 func validateServer(cfg *Config, errs *ValidationError) {
 	if strings.TrimSpace(cfg.Server.Listen) == "" {
 		errs.addf("server.listen 不能为空，示例 \":9080\"")
+	}
+	basePath := strings.TrimSpace(cfg.Server.BasePath)
+	if basePath != "" && basePath != "/" {
+		switch {
+		case !strings.HasPrefix(basePath, "/"):
+			errs.addf("server.base_path = %q 非法，必须以 \"/\" 开头", cfg.Server.BasePath)
+		case strings.HasSuffix(basePath, "/"):
+			errs.addf("server.base_path = %q 非法，不能以 \"/\" 结尾", cfg.Server.BasePath)
+		case strings.ContainsAny(basePath, "?#"):
+			errs.addf("server.base_path = %q 非法，不能包含查询串或片段", cfg.Server.BasePath)
+		case strings.Contains(basePath, "//"):
+			errs.addf("server.base_path = %q 非法，不能包含连续的 \"/\"", cfg.Server.BasePath)
+		default:
+			for _, segment := range strings.Split(basePath, "/") {
+				if segment == "." || segment == ".." {
+					errs.addf("server.base_path = %q 非法，不能包含 \".\" 或 \"..\" 路径段", cfg.Server.BasePath)
+					break
+				}
+			}
+		}
 	}
 	if cfg.Server.ReadHeaderTimeout.Duration() <= 0 {
 		errs.addf("server.read_header_timeout 必须大于 0，示例 \"3s\"")
@@ -121,10 +145,6 @@ func validateIngress(cfg *Config, errs *ValidationError) {
 	if !strings.HasPrefix(ingress.DenyPath, "/") {
 		errs.addf("ingress.deny_path = %q 非法，必须以 \"/\" 开头", ingress.DenyPath)
 	}
-	if ingress.Path == ingress.DenyPath {
-		errs.addf("ingress.path 与 ingress.deny_path 不能相同（%q），否则鉴权端点会被渲染端点覆盖", ingress.Path)
-	}
-
 	if len(ingress.Headers.URI) == 0 {
 		errs.addf("ingress.headers.uri 不能为空，否则无法还原原始请求 URI")
 	}
@@ -238,6 +258,12 @@ func validateResponder(cfg *Config, errs *ValidationError) {
 	if cfg.Responder.Type != "json" {
 		errs.addEnum("responder.type", cfg.Responder.Type, "json")
 	}
+	if cfg.Responder.Template != "" && cfg.Responder.TemplateFile != "" {
+		errs.addf("responder.template 与 responder.template_file 不能同时配置")
+	}
+	if cfg.Responder.MaxBodyBytes < 0 {
+		errs.addf("responder.max_body_bytes = %d 非法，不能为负数", cfg.Responder.MaxBodyBytes)
+	}
 }
 
 // validateEngine 校验检测引擎配置。
@@ -295,6 +321,16 @@ func validateEngine(cfg *Config, errs *ValidationError) {
 		// （见 internal/check/coraza/reload.go），既准确又不阻断启动。
 	}
 	validateExceptions(engine.Exceptions, errs)
+	for index, name := range engine.VirtualPatches {
+		if !vpatch.Known(name) {
+			errs.addf("engine.virtual_patches[%d] = %q 不是内置虚拟补丁模板", index, name)
+		}
+	}
+	for index, file := range engine.VirtualPatchFiles {
+		if strings.TrimSpace(file) == "" {
+			errs.addf("engine.virtual_patch_files[%d] 不能为空", index)
+		}
+	}
 }
 
 // validateExceptions 校验误报例外清单。
@@ -382,26 +418,50 @@ func validateEngineBodyProcessors(cfg *Config, errs *ValidationError) {
 // validatePipeline 校验校验链声明的唯一性与取值合法性。
 func validatePipeline(cfg *Config, errs *ValidationError) {
 	seen := make(map[string]struct{}, len(cfg.Pipeline))
-	for i, inst := range cfg.Pipeline {
-		prefix := fmt.Sprintf("pipeline[%d]", i)
+	validateInstances := func(prefix string, instances []core.InstanceConfig) {
+		for i, inst := range instances {
+			instPrefix := fmt.Sprintf("%s[%d]", prefix, i)
 
-		if strings.TrimSpace(inst.Name) == "" {
+			if strings.TrimSpace(inst.Name) == "" {
+				errs.addf("%s.name 不能为空", instPrefix)
+			} else if _, dup := seen[inst.Name]; dup {
+				errs.addf("%s.name = %q 重复，实例名必须全局唯一", instPrefix, inst.Name)
+			} else {
+				seen[inst.Name] = struct{}{}
+			}
+
+			if strings.TrimSpace(inst.Type) == "" {
+				errs.addf("%s.type 不能为空（%s[%s] 必须声明实现类型）", instPrefix, prefix, inst.Name)
+			}
+
+			switch inst.OnError {
+			case "", "pass", "block":
+			default:
+				errs.addEnum(instPrefix+".on_error", inst.OnError, "pass", "block")
+			}
+		}
+	}
+
+	validateInstances("pipeline", cfg.Pipeline)
+	names := make(map[string]struct{}, len(cfg.Pipelines))
+	for i, pipeline := range cfg.Pipelines {
+		prefix := fmt.Sprintf("pipelines[%d]", i)
+		name := strings.TrimSpace(pipeline.Name)
+		switch {
+		case name == "":
 			errs.addf("%s.name 不能为空", prefix)
-		} else if _, dup := seen[inst.Name]; dup {
-			errs.addf("%s.name = %q 重复，实例名必须全局唯一", prefix, inst.Name)
-		} else {
-			seen[inst.Name] = struct{}{}
-		}
-
-		if strings.TrimSpace(inst.Type) == "" {
-			errs.addf("%s.type 不能为空（pipeline[%s] 必须声明实现类型）", prefix, inst.Name)
-		}
-
-		switch inst.OnError {
-		case "", "pass", "block":
+		case name == "default":
+			errs.addf("%s.name = \"default\" 是保留名，默认链请使用顶层 pipeline", prefix)
+		case !segmentPattern.MatchString(name):
+			errs.addf("%s.name = %q 非法，只能由小写字母、数字与下划线组成，且不能以数字开头", prefix, name)
 		default:
-			errs.addEnum(prefix+".on_error", inst.OnError, "pass", "block")
+			if _, dup := names[name]; dup {
+				errs.addf("%s.name = %q 重复，具名校验链名必须唯一", prefix, name)
+			} else {
+				names[name] = struct{}{}
+			}
 		}
+		validateInstances(prefix+".instances", pipeline.Instances)
 	}
 }
 
@@ -455,11 +515,22 @@ func validateStores(cfg *Config, errs *ValidationError) {
 // 判断依据是实例的 settings.store 字段；这类实例缺少存储定义时无法工作，
 // 因此必须在启动阶段报错，而不是在首个请求到达时才失败。
 func referencesStore(cfg *Config) bool {
-	for _, inst := range cfg.Pipeline {
-		if !inst.Enabled {
-			continue
+	hasStore := func(instances []core.InstanceConfig) bool {
+		for _, inst := range instances {
+			if !inst.Enabled {
+				continue
+			}
+			if _, ok := inst.Settings["store"]; ok {
+				return true
+			}
 		}
-		if _, ok := inst.Settings["store"]; ok {
+		return false
+	}
+	if hasStore(cfg.Pipeline) {
+		return true
+	}
+	for _, pipeline := range cfg.Pipelines {
+		if hasStore(pipeline.Instances) {
 			return true
 		}
 	}
@@ -710,6 +781,10 @@ func validateAlertLevel(path, level string, errs *ValidationError) {
 
 // validateSites 校验站点策略声明。
 func validateSites(cfg *Config, errs *ValidationError) {
+	pipelines := make(map[string]struct{}, len(cfg.Pipelines))
+	for _, pipeline := range cfg.Pipelines {
+		pipelines[strings.TrimSpace(pipeline.Name)] = struct{}{}
+	}
 	seen := make(map[string]struct{}, len(cfg.Sites))
 	for i, site := range cfg.Sites {
 		prefix := fmt.Sprintf("sites[%d]", i)
@@ -729,13 +804,30 @@ func validateSites(cfg *Config, errs *ValidationError) {
 			errs.addEnum(prefix+".engine_mode", site.EngineMode,
 				EngineModeInherit, EngineModeOn, EngineModeDetectionOnly)
 		}
+		switch site.AccessAction {
+		case "", "block", "observe":
+		default:
+			errs.addEnum(prefix+".access_action", site.AccessAction, "block", "observe")
+		}
+		if site.AccessScore < 0 {
+			errs.addf("%s.access_score = %d 非法，不能为负数", prefix, site.AccessScore)
+		}
+		if _, err := netx.NewSet(site.Allowlist); err != nil {
+			errs.addf("%s.allowlist 非法：%v", prefix, err)
+		}
+		if _, err := netx.NewSet(site.Blocklist); err != nil {
+			errs.addf("%s.blocklist 非法：%v", prefix, err)
+		}
+		pipeline := strings.TrimSpace(site.Pipeline)
+		if pipeline != "" && pipeline != "default" {
+			if _, ok := pipelines[pipeline]; !ok {
+				errs.addf("%s.pipeline = %q 不存在；请在 pipelines[] 中声明该具名校验链", prefix, site.Pipeline)
+			}
+		}
 	}
 }
 
 // validateMetrics 校验指标端点配置。
-//
-// 之所以在此处拦截「路径与既有端点冲突」：重复注册同一路径会让 http.ServeMux
-// 在启动阶段直接 panic（而不是给出可读的错误），必须在配置校验阶段提前拦住。
 func validateMetrics(cfg *Config, errs *ValidationError) {
 	metrics := cfg.Metrics
 	path := strings.TrimSpace(metrics.Path)
@@ -744,10 +836,6 @@ func validateMetrics(cfg *Config, errs *ValidationError) {
 		errs.addf("metrics.path 不能为空，示例 \"/metrics\"")
 	case !strings.HasPrefix(path, "/"):
 		errs.addf("metrics.path = %q 非法，必须以 / 开头", metrics.Path)
-	default:
-		if reservedEndpointPaths(cfg)[path] {
-			errs.addf("metrics.path = %q 与既有端点冲突，请改用其它路径", path)
-		}
 	}
 
 	if !metrics.Enabled {
@@ -758,14 +846,38 @@ func validateMetrics(cfg *Config, errs *ValidationError) {
 	}
 }
 
-// reservedEndpointPaths 返回已被占用的 HTTP 端点路径集合。
-func reservedEndpointPaths(cfg *Config) map[string]bool {
-	return map[string]bool{
-		cfg.Ingress.Path:     true,
-		cfg.Ingress.DenyPath: true,
-		"/healthz":           true,
-		"/readyz":            true,
-		"/version":           true,
+// validateRouteCollisions 校验全部 WAF HTTP 端点叠加统一前缀后的最终路径是否冲突。
+//
+// 为什么必须在配置阶段拦截：重复注册同一路径会让 http.ServeMux 在启动阶段
+// 直接 panic（而不是给出可读错误）。同时，前缀会让「配置里看起来不同的路径」
+// 在叠加 server.base_path 后变成同一个路径（例如 base=/waf、path=/auth 与
+// deny_path=/waf/auth），因此必须比较最终生效路径而不是原始配置值。
+func validateRouteCollisions(cfg *Config, errs *ValidationError) {
+	base := cfg.Server.BasePath
+	endpoints := []struct {
+		name string
+		path string
+	}{
+		{name: "ingress.path", path: cfg.Ingress.Path},
+		{name: "ingress.deny_path", path: cfg.Ingress.DenyPath},
+		{name: "内置端点 /healthz", path: "/healthz"},
+		{name: "内置端点 /readyz", path: "/readyz"},
+		{name: "内置端点 /version", path: "/version"},
+		{name: "metrics.path", path: strings.TrimSpace(cfg.Metrics.Path)},
+	}
+
+	seen := make(map[string]string, len(endpoints))
+	for _, endpoint := range endpoints {
+		path := JoinBasePath(base, endpoint.path)
+		if path == "" {
+			continue
+		}
+		if previous, exists := seen[path]; exists {
+			errs.addf("%s 与 %s 的最终路径冲突（均为 %q，已叠加 server.base_path=%q），请修改其中一个路径",
+				endpoint.name, previous, path, base)
+			continue
+		}
+		seen[path] = endpoint.name
 	}
 }
 
@@ -816,5 +928,44 @@ func validateCache(cfg *Config, errs *ValidationError) {
 	}
 	if cache.TTL.Duration() <= 0 {
 		errs.addf("cache.ttl 必须大于 0，示例 \"5m\"")
+	}
+}
+
+// validateDatabase 校验 SQLite 数据库配置。
+func validateDatabase(cfg *Config, errs *ValidationError) {
+	database := cfg.Database
+	if !database.Enabled {
+		// 关闭时只允许保留默认值；不影响原有 stores[] 行为。
+		return
+	}
+	if strings.TrimSpace(database.Path) == "" {
+		errs.addf("database.enabled = true 时 database.path 不能为空")
+	}
+	if database.BusyTimeout.Duration() <= 0 {
+		errs.addf("database.busy_timeout 必须大于 0")
+	}
+	if database.ReloadInterval.Duration() <= 0 {
+		errs.addf("database.reload_interval 必须大于 0")
+	}
+	switch database.Audit.Mode {
+	case DatabaseAuditModeOff:
+		return
+	case DatabaseAuditModeEvents, DatabaseAuditModeAll:
+	default:
+		errs.addEnum("database.audit.mode", database.Audit.Mode,
+			DatabaseAuditModeOff, DatabaseAuditModeEvents, DatabaseAuditModeAll)
+		return
+	}
+	if database.Audit.Retention.Duration() < 0 {
+		errs.addf("database.audit.retention 不能为负数")
+	}
+	if database.Audit.QueueSize <= 0 {
+		errs.addf("database.audit.queue_size 必须大于 0")
+	}
+	if database.Audit.BatchSize <= 0 {
+		errs.addf("database.audit.batch_size 必须大于 0")
+	}
+	if database.Audit.FlushInterval.Duration() <= 0 {
+		errs.addf("database.audit.flush_interval 必须大于 0")
 	}
 }

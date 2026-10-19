@@ -243,8 +243,11 @@ func New(inst core.InstanceConfig, deps *core.Deps) (core.Check, error) {
 		triggers[name] = struct{}{}
 	}
 	if !triggerAny && len(triggers) == 0 {
-		// 未配置触发条件时默认只对拦截类结论生效，行为可预期且最保守。
+		// 未配置触发条件时默认对拦截类结论与蜜罐命中生效。
+		// 蜜罐命中属于高置信度攻击信号，必须进入同一套窗口计数，
+		// 否则攻击者反复探测诱饵端点时永远不会触发自动封禁。
 		triggers[core.VerdictBlock.String()] = struct{}{}
+		triggers[core.VerdictHoneypot.String()] = struct{}{}
 	}
 
 	// 最低严重度门槛：与 threshold 单元的 min_severity 语义保持一致，
@@ -448,6 +451,7 @@ func (c *Check) appendDimensionResult(rctx *core.RequestContext, verdict core.Ve
 
 	finding := core.NewFinding(c.name, ruleIDAutoBan, reason, core.SeverityHigh, 0)
 	finding.Data = map[string]string{
+		"target":    string(dim.scope),
 		"ban_key":   banKey,
 		"ban_scope": string(dim.scope),
 		"hit_count": fmt.Sprintf("%d", count),
@@ -473,6 +477,8 @@ func (c *Check) appendDimensionResult(rctx *core.RequestContext, verdict core.Ve
 		TTL:    dim.ttl.Duration(),
 		Reason: reason,
 		RuleID: ruleIDAutoBan,
+		Check:  c.name,
+		Target: string(dim.scope),
 	})
 	if c.alert {
 		result.Alerts = append(result.Alerts, c.newAlert(rctx, dim.scope, banKey, count, false))

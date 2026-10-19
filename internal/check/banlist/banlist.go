@@ -170,6 +170,7 @@ func (c *Check) Evaluate(rctx *core.RequestContext) (*core.Result, error) {
 	finding := core.NewFinding(c.name, "internal_banlist", "来源已在内部封禁名单中",
 		core.SeverityHigh, c.score)
 	finding.Data = map[string]string{
+		"target":         scope,
 		"ban_key":        key,
 		"ban_scope":      scope,
 		"remaining":      remaining.String(),

@@ -32,9 +32,11 @@ import (
 	corazaexp "github.com/corazawaf/coraza/v3/experimental/plugins/plugintypes"
 	corazatypes "github.com/corazawaf/coraza/v3/types"
 
+	"github.com/weiyongkang/waf/internal/config"
 	"github.com/weiyongkang/waf/internal/core"
 	"github.com/weiyongkang/waf/internal/rules"
 	"github.com/weiyongkang/waf/internal/rules/exceptions"
+	"github.com/weiyongkang/waf/internal/vpatch"
 )
 
 // Type 是本实现的注册类型名（配置文件中 pipeline[].type）。
@@ -119,6 +121,10 @@ type Settings struct {
 	CustomRuleDirs []string `yaml:"custom_rule_dirs"`
 	// InlineDirectives 覆盖全局 engine.inline_directives。
 	InlineDirectives []string `yaml:"inline_directives"`
+	// VirtualPatches 是启用的内置虚拟补丁模板（ID 或 CVE 编号）。
+	VirtualPatches []string `yaml:"virtual_patches"`
+	// VirtualPatchFiles 是自定义 SecLang 虚拟补丁文件。
+	VirtualPatchFiles []string `yaml:"virtual_patch_files"`
 	// BodyAccess 覆盖全局 engine.body.access。
 	BodyAccess *bool `yaml:"body_access"`
 	// BodyLimitBytes 覆盖全局 engine.body.limit_bytes；<=0 时继承。
@@ -281,7 +287,19 @@ func buildCheck(inst core.InstanceConfig, deps *core.Deps) (*Check, error) {
 		return nil, fmt.Errorf("误报例外编译失败：%w", err)
 	}
 
-	directives := buildDirectives(set, effective, bodyAccess, exceptionSet)
+	patches, err := vpatch.Resolve(vpatch.Options{
+		Names: effective.VirtualPatches, Files: effective.VirtualPatchFiles,
+		MaxFileBytes: deps.Limits.MaxRuleFileBytes,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("虚拟补丁编译失败：%w", err)
+	}
+	for _, patch := range patches {
+		deps.SystemLoggerOr().Info("虚拟补丁已启用",
+			"instance", inst.Name, "patch", patch.ID, "cve", patch.CVE, "source", patch.Source)
+	}
+
+	directives := buildDirectives(set, effective, bodyAccess, exceptionSet, deps.Sites, vpatch.Directives(patches))
 
 	wafConfig := corazawaf.NewWAFConfig().
 		WithRootFS(set.FS).
@@ -467,6 +485,23 @@ func (c *Check) Evaluate(rctx *core.RequestContext) (*core.Result, error) {
 	return c.passedResult(rctx, tx), nil
 }
 
+// effectiveMode 返回本次请求实际生效的引擎模式。
+//
+// 站点级 engine_mode 由 engine.go 注入的 ctl:ruleEngine 规则在事务内切换；
+// 这里同步使用同一口径解释结果，避免「引擎按站点观察命中，但结果被当作拦截」
+// 或反过来的割裂。inherit / 空值回落实例级模式。
+func (c *Check) effectiveMode(rctx *core.RequestContext) string {
+	if rctx != nil && rctx.Site != nil {
+		switch strings.TrimSpace(rctx.Site.EngineMode) {
+		case ModeOn:
+			return ModeOn
+		case ModeDetectionOnly:
+			return ModeDetectionOnly
+		}
+	}
+	return c.mode
+}
+
 // evaluateBody 执行请求体阶段求值。
 //
 // 行为要点：
@@ -580,11 +615,13 @@ func (c *Check) blockedResult(rctx *core.RequestContext, tx corazatypes.Transact
 		Score:    c.anomalyScore(tx),
 		Findings: c.findings(tx, ruleID),
 	}
-	if c.mode == ModeDetectionOnly {
+	if c.effectiveMode(rctx) == ModeDetectionOnly {
 		// 防御性处理：detection_only 下 SecRuleEngine=DetectionOnly 本不应产生中断；
 		// 一旦产生（例如实例级 mode 与规则内 ctl 动作冲突），按观察处理而不是拦截，
 		// 避免「配置成只观察却真的拦了」。
 		result.Verdict = core.VerdictObserve
+		result.MarkWouldBlock(fmt.Sprintf("站点 %s 配置为 detection_only，规则 %s 本应拦截",
+			rctx.Site.Name, ruleID))
 	}
 	result.AddAlert(c.newAlert(rctx, result.Verdict, ruleID, result.Score))
 	c.storeScore(rctx, result.Score)
@@ -614,7 +651,14 @@ func (c *Check) passedResult(rctx *core.RequestContext, tx corazatypes.Transacti
 	// 判定口径：观察模式下 CRS 的 deny 动作被引擎抑制（tx.Interruption() 为 nil），
 	// 但异常评分照常累计。因此「评分越过阈值」就是「如果开着拦截，这次请求会被拦」。
 	// 阈值取 engine.anomaly_score_threshold，与 CRS 自身阻断判定、threshold 单元同源。
-	if c.mode == ModeDetectionOnly && c.wouldBlockThreshold > 0 && score >= c.wouldBlockThreshold {
+	mode := c.effectiveMode(rctx)
+	if mode == ModeOn && c.wouldBlockThreshold > 0 && score >= c.wouldBlockThreshold && len(findings) > 0 {
+		// 全局/实例是 detection_only、站点显式覆盖为 on 时，引擎不会产生中断，
+		// 但异常评分仍然是权威的「本应拦截」证据。这里让站点级 on 真正生效。
+		result.Verdict = core.VerdictBlock
+		result.Code = config.CodeBlocked
+	}
+	if mode == ModeDetectionOnly && c.wouldBlockThreshold > 0 && score >= c.wouldBlockThreshold {
 		ruleID := firstReportableRuleID(findings)
 		c.metrics.IncWouldBlock(c.name, ruleID)
 		result.MarkWouldBlock(fmt.Sprintf("评分 %d 达到阈值 %d（首条命中规则 %s）",
@@ -672,6 +716,7 @@ func (c *Check) findings(tx corazatypes.Transaction, fallbackRuleID string) []co
 		finding.Data = map[string]string{
 			"rule_id":     id,
 			"matched_var": firstMatchedVar(rule),
+			"target":      firstMatchedVar(rule),
 			"data":        truncate(rule.Data(), 512),
 		}
 		findings = append(findings, finding)

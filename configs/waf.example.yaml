@@ -5,6 +5,14 @@
 # 使用方式：
 #   waf check-config -c configs/waf.example.yaml     # 校验并查看生效配置与来源摘要
 #   waf run          -c configs/waf.example.yaml     # 启动服务
+#   waf run          -c /etc/waf/conf.d              # 指向目录：按文件名字典序合并并自动热重载
+#
+# 目录模式建议用数字前缀明确覆盖顺序，例如：
+#   /etc/waf/conf.d/10-server.yaml
+#   /etc/waf/conf.d/20-ingress.yaml
+#   /etc/waf/conf.d/30-responder.yaml
+#   /etc/waf/conf.d/40-pipeline.yaml
+# 目录只读取一层，支持 .yaml/.yml/.json；数组字段（pipeline/sites/notifiers）仍为整体替换。
 #
 # 配置优先级（高到低，需求 R16）：CLI > 本配置文件 > 环境变量 > 内置默认值
 #   - CLI：      --server-listen=:9081 / --set server.listen=:9081
@@ -29,6 +37,12 @@ server:
   listen: ":9080"
   # 指标与探针的独立监听地址，便于按网络隔离（不能与 listen 相同）。
   metrics_listen: ":9090"
+  # 所有 WAF HTTP 端点的统一前缀（例如 "/gateway"）；留空表示保持旧路径不变。
+  #
+  # 设置后 ingress.path / ingress.deny_path 以及 /healthz、/readyz、/metrics、
+  # /version 都会自动加上该前缀；已经包含前缀的路径不会重复拼接（兼容旧配置）。
+  # 修改后必须同步调整代理侧 forwardAuth / auth_request 的目标地址。
+  base_path: ""
   # 读取请求头的超时，用于抵御慢速请求攻击。
   read_header_timeout: 3s
   # 优雅关停的最长等待时间。
@@ -122,6 +136,20 @@ responder:
     WAF_UNAUTHORIZED: "需要身份认证"
     WAF_BAD_REQUEST: "请求不符合安全要求"
     WAF_UNAVAILABLE: "安全检测服务暂时不可用"
+    WAF_NOT_FOUND: "请求的 WAF 端点不存在"
+
+  # 自定义 JSON 响应模板（Go text/template 语法）；与 template_file 二选一。
+  #
+  # 留空时使用内置 ErrorBody 结构。模板可用字段：
+  #   .Code .Status .Message .RequestID .Timestamp .Verdict .Site .Path .ClientIP
+  #   .Check .RuleID .Score .RetryAfter .HasDetails .Details .Messages
+  # 字符串字段必须通过 json 函数输出，例如 {"code": {{ .Code | json }}}，
+  # 否则可能生成非法 JSON。启动与 check-config 阶段会用样例数据校验模板。
+  template: ""
+  # 外部模板文件路径；与 template 二选一，文件大小上限 64 KiB。
+  template_file: ""
+  # 模板渲染结果的字节上限；<=0 时使用默认值 8192。
+  max_body_bytes: 8192
 
 # -----------------------------------------------------------------------------
 # (3) 检测引擎（Coraza + CRS）；enabled=false 时退化为纯前置访问控制
@@ -155,6 +183,14 @@ engine:
     crs_setup: crs-setup.conf
   inline_directives:
     - "SecRequestBodyAccess On"
+  # 内置虚拟补丁模板（按 ID 或 CVE 编号启用）；自定义 SecLang 补丁放在 virtual_patch_files。
+  # 可用模板：cve-2021-44228（Log4Shell）、cve-2022-22965（Spring4Shell）、
+  #          cve-2021-41773（Apache 路径穿越）、cve-2024-3400（PAN-OS 命令注入）。
+  virtual_patches: []
+  virtual_patch_files: []
+  # 示例：
+  # virtual_patches: ["cve-2021-44228", "cve-2022-22965"]
+  # virtual_patch_files: ["/etc/waf/vpatch/custom.conf"]
   body:
     access: true
     # 引擎侧请求体上限（对应 SecRequestBodyLimit）
@@ -181,12 +217,13 @@ engine:
         enabled: true
         content_types:
           - '^(?:application|text)/(?:[^;,\s]+\+)?xml(?:\s*;.*)?$'
-  # 规则热加载：规则文件变化后原子替换检测引擎，失败保留旧引擎继续服务。
+  # 规则热加载：CRS 规则目录（engine.rules.dirs/custom_dirs）与蜜罐规则目录
+  # （honeypot.settings.rules_dir）变化后原子替换规则实例，失败保留旧规则继续服务。
   hot_reload:
     enabled: true
     # 去抖动：指纹变化后再等一个周期复核，避免打包/解包过程中「边写边改」触发多次重载。
     debounce: 1s
-    # 指纹轮询间隔。为什么用轮询而不是 inotify：
+    # 指纹轮询间隔（CRS 与蜜罐共用）。为什么用轮询而不是 inotify：
     #   - 交付物是静态单二进制，引入 fsnotify 会增加依赖面（需求 R10 / R14）；
     #   - 轮询在挂载卷 / 网络文件系统 / 容器 overlay 下行为一致；
     #   - 指纹只做 stat（不读文件内容），几十个规则文件的代价可忽略（需求 R13）。
@@ -241,8 +278,13 @@ sites:
     hosts: ["*"]
     # inherit：继承全局 engine.mode；detection_only：本站点只观察不拦截；on：本站点强制拦截
     engine_mode: inherit
-    # 站点级校验链名（多链灰度预留；当前阶段各站点共用全局 pipeline）
+    # 站点级校验链名：default 使用顶层 pipeline；其它值引用 pipelines[] 中的具名链
     pipeline: default
+    # 站点级 IP / CIDR 访问控制：白名单直接放行，黑名单按 access_action 处理。
+    allowlist: []
+    blocklist: []
+    access_action: block      # block / observe
+    access_score: 5
     # 站点级参数覆盖：键名为「插件类型.参数名」，对本站点内所有同类型插件实例生效，
     # 优先级高于实例 settings。当前已支持的键见下文「限速」示例。
     # params:
@@ -253,8 +295,12 @@ sites:
   # 示例：为特定域名单独收紧限速（去掉注释即可生效；与上面的 default 站点并存）
   # - name: shop
   #   hosts: ["shop.example.com", "*.shop.example.com"]
-  #   engine_mode: inherit
-  #   pipeline: default
+  #   engine_mode: detection_only
+  #   pipeline: shop-strict
+  #   allowlist: ["203.0.113.10/32"]
+  #   blocklist: ["198.51.100.0/24"]
+  #   access_action: block
+  #   access_score: 10
   #   params:
   #     # 敏感站点：阈值收紧到 60 次/分钟
   #     ratelimit.limit: "60"
@@ -276,6 +322,41 @@ pipeline:
   #       body 阶段实例时，运行期才会真正读取请求体（按需读体，需求 R13）。
 
   # --- pre 阶段：纯元数据判断，代价最低，排在链首 ---
+  # 蜜罐 / 诱饵端点：命中后按规则返回伪造页面，不进入统一 JSON 拦截模板。
+  # 规则格式与 reference/honeypot 对齐，可直接用 rules_dir 指向其规则目录。
+  # /waf/auth 只返回 403 + WAF_HONEYPOT 元数据，最终页面由 /waf/deny
+  # 按原始请求重新匹配规则后生成；Traefik / Nginx / OpenResty 三通道统一。
+  - name: honeypot
+    type: honeypot
+    enabled: false
+    order: 1
+    phase: pre
+    on_error: pass
+    settings:
+      # 命中时累加的异常评分，可被 threshold / autoban 使用
+      score: 10
+      # 命中是否产生告警（默认 true）
+      alert: true
+      # 内联规则；目录规则可通过 rules_dir 加载（递归读取 .yaml / .yml）。
+      # 配置 rules_dir 后，运行期会按 engine.hot_reload.poll_interval 扫描目录，
+      # 文件变化后自动热加载；加载失败保留旧规则。
+      rules_dir: ""
+      rules:
+        - name: phpinfo
+          method: GET
+          path: /phpinfo.php
+          # exact（默认）/ prefix / glob / regex
+          match: exact
+          # path（默认，不含查询串）/ uri（含查询串）
+          target: path
+          status: 200
+          content_type: text/html
+          headers:
+            Server: Apache/2.4.59
+            X-Powered-By: PHP/8.2.17
+          body: |
+            <!DOCTYPE html><html><body><h1>PHP Version 8.2.17</h1></body></html>
+
   - name: ban-list
     type: banlist
     enabled: true
@@ -339,6 +420,68 @@ pipeline:
       ban: true
       ban_ttl: 15m
 
+  # --- 本地身份 / 人机校验（PhaseRequest） ---
+  # basic：浏览器原生登录框；cookie：Basic 成功后下发 HMAC 签名 Cookie；
+  # basic_or_cookie：两者均可。cookie 模式必须配置至少 16 字节的 secret。
+  - name: challenge
+    type: challenge
+    enabled: false
+    order: 25
+    phase: request
+    on_error: block
+    settings:
+      mode: basic_or_cookie
+      realm: "waf-admin"
+      cookie_name: waf_auth
+      cookie_path: "/"
+      cookie_secure: true
+      ttl: 1h
+      # 生产环境建议用 secret_file，避免把密钥写进配置仓库。
+      secret: ""
+      secret_file: ""
+      users:
+        - username: admin
+          # password 与 password_sha256 二选一；推荐后者（SHA-256 十六进制）。
+          password: "change-me"
+
+  # --- 本地 GeoIP 地域访问控制（PhaseRequest） ---
+  # 只读取本地 GeoLite2 Country/City MMDB，不访问云端 API。
+  - name: geoip
+    type: geoip
+    enabled: false
+    order: 26
+    phase: request
+    on_error: pass
+    settings:
+      database: "/etc/waf/GeoLite2-Country.mmdb"
+      action: block              # block / observe
+      score: 5
+      allow_countries: ["CN"]
+      block_countries: ["KP"]
+      allow_continents: []
+      block_continents: []
+      hot_reload: true
+      poll_interval: 5s
+
+  # --- 本地威胁情报（PhaseRequest） ---
+  # 支持单个 IP/CIDR、ASN、精确域名与 *.example.com；文件/目录递归加载。
+  - name: threatintel
+    type: threatintel
+    enabled: false
+    order: 27
+    phase: request
+    on_error: pass
+    settings:
+      files: ["/etc/waf/intel/blocklist.txt"]
+      dirs: ["/etc/waf/intel"]
+      # 情报中包含 ASN 条目时必填。
+      asn_database: "/etc/waf/GeoLite2-ASN.mmdb"
+      action: block              # block / observe
+      score: 10
+      max_total_bytes: 67108864
+      hot_reload: true
+      refresh_interval: 30s
+
   # --- request 阶段：只看请求行与请求头 ---
   - name: crs-header
     type: coraza
@@ -353,6 +496,26 @@ pipeline:
       score_key: inbound_anomaly_score
       # 单次请求最多记录的命中明细条数（防止日志放大）
       max_findings: 16
+
+  # --- OpenAPI 请求契约校验（PhaseBody） ---
+  # 校验路径/查询/Header/Cookie 参数与 JSON 请求体；未声明接口默认放行。
+  - name: apisec
+    type: apisec
+    enabled: false
+    order: 32
+    phase: body
+    on_error: pass
+    settings:
+      spec_file: "/etc/waf/openapi.yaml"
+      action: block              # block / observe
+      score: 5
+      unknown_action: off        # off / block / observe
+      check_parameters: true
+      check_body: true
+      max_violations: 8
+      max_body_bytes: 1048576
+      hot_reload: true
+      poll_interval: 5s
       # 可选项（未配置即继承全局 engine 配置）：
       # mode: detection_only      本实例只观察不拦截
       # paranoia_level: 2         本实例使用更高的偏执等级
@@ -395,8 +558,9 @@ pipeline:
     order: 90
     phase: post
     settings:
-      # 计入触发条件的链结论（block / ratelimit / observe ...）；any 表示任何终态结论
-      trigger_on: [block, ratelimit]
+      # 计入触发条件的链结论（block / ratelimit / honeypot / observe ...）；any 表示任何终态结论。
+      # honeypot 必须显式列入（或使用 any）才会把蜜罐命中计入下面的阈值与窗口。
+      trigger_on: [block, ratelimit, honeypot]
       # 最低命中严重度门槛（info / low / medium / high / critical；留空表示不设门槛）。
       # 为什么需要它：命中次数衡量的是「量」，严重度衡量的是「质」；
       # 不设门槛时，来源只要把低危规则刷够次数就会被封，误伤概率远大于收益。
@@ -431,6 +595,37 @@ pipeline:
       skip_when_banned: true
       # 触发时是否产生告警事件（由后续里程碑的告警通道外送）
       alert: true
+
+# -----------------------------------------------------------------------------
+# (5.1) 具名校验链：sites[].pipeline 引用，实现站点级差异化
+# -----------------------------------------------------------------------------
+# 顶层 pipeline 是默认链；下面的具名链在装配期独立构建，请求期只做一次 map 查找。
+# 注意：所有实例 name 必须全局唯一，且具名链不能命名为 default。
+# pipelines:
+#   - name: shop-strict
+#     instances:
+#       - name: shop-banlist
+#         type: banlist
+#         enabled: true
+#         order: 5
+#         phase: pre
+#         settings: { action: block, store_timeout: 200ms }
+#       - name: shop-challenge
+#         type: challenge
+#         enabled: true
+#         order: 10
+#         phase: request
+#         settings:
+#           mode: basic
+#           users:
+#             - username: shop
+#               password_sha256: "2bb80d537b1da3e38bd30361aa855686bde0eacd7162fef6a25fe97bf527a25b"
+#       - name: shop-apisec
+#         type: apisec
+#         enabled: true
+#         order: 20
+#         phase: body
+#         settings: { spec_file: "/etc/waf/shop-openapi.yaml", action: block }
 # -----------------------------------------------------------------------------
 # (6) 共享状态存储：限速计数 + 内部封禁名单（多实例共享，需求 R17 / R23 / R25）
 #     启用规则：enabled=false 时不连接 Redis，直接使用 fallback 指定的本地实现
@@ -507,7 +702,37 @@ stores:
       max_entries: 1000000
 
 # -----------------------------------------------------------------------------
-# (7) 封禁策略：仅在本 WAF 内部生效，不执行任何系统防火墙操作（需求 R18 / R19）
+# (7) 运行期 SQLite：封禁、IP 名单、站点策略、关键标量策略与可选审计
+#
+# 数据边界（重要）：
+#   - 会保存：封禁记录、封禁事件、站点策略、站点/IP 名单、ipaccess 名单、
+#             ban / engine / responder 中的关键标量策略、可选请求审计；
+#   - 不会保存：监听地址、stores/Redis 连接、规则目录、MMDB/模板/密钥路径、
+#               日志、指标、limits、cache 等部署配置。
+#
+# 启用后首次启动会把本 YAML 中对应的运营数据导入数据库；之后以数据库为准，
+# YAML 中这些字段只作为首次导入素材。修改数据库策略后无需重启，运行实例会按
+# reload_interval 检查版本并热重载。database 段本身变更仍需重启。
+# -----------------------------------------------------------------------------
+database:
+  # 默认关闭：关闭时保持原有 stores[] 与 YAML 行为，也不会自动创建数据库文件。
+  enabled: false
+  # 相对路径按 WAF 进程工作目录解析；容器部署建议挂载到持久卷。
+  path: data/waf.db
+  busy_timeout: 5s
+  # 数据库策略版本轮询间隔；只查询一个整数版本号，开销可忽略。
+  reload_interval: 10s
+  # 请求审计落库：off（关闭）| events（拦截/观察/蜜罐/异常）| all（全部）
+  audit:
+    mode: events
+    # 审计记录保留时长；0 表示不自动清理。
+    retention: 720h
+    queue_size: 4096
+    batch_size: 100
+    flush_interval: 1s
+
+# -----------------------------------------------------------------------------
+# (8) 封禁策略：仅在本 WAF 内部生效，不执行任何系统防火墙操作（需求 R18 / R19）
 # -----------------------------------------------------------------------------
 ban:
   # 默认封禁时长：30m 是「足够劝退扫描器/爆破脚本」与「避免办公网 NAT 出口误封」的平衡点。
@@ -531,9 +756,15 @@ ban:
   escalate: false
   escalate_steps: [30m, 2h, 24h]
   escalate_window: 24h
+  # 重复命中时是否刷新已有封禁的到期时间。
+  #
+  # false（默认）：到期时间在首次封禁时确定，封禁期内相同来源再次触发也只记录
+  #               日志，不续期、不新增名单记录；到期后自动解封。
+  # true：恢复旧行为，每次命中都重新计算 TTL（持续攻击会让封禁不断延长）。
+  renew_on_repeat: false
 
 # -----------------------------------------------------------------------------
-# (8) 告警外送（并联，可配置多个通道；任一通道失败不影响判定结果）
+# (9) 告警外送（并联，可配置多个通道；任一通道失败不影响判定结果）
 # -----------------------------------------------------------------------------
 # 告警外送的公共策略。
 #
@@ -630,7 +861,7 @@ notifiers: []
 #       insecure_tls: false
 #       timeout: 10s
 # -----------------------------------------------------------------------------
-# (9) 日志：两类、分级、JSON（需求 R21）
+# (10) 日志：两类、分级、JSON（需求 R21）
 #     system = 系统运行日志；access = 请求访问与拦截日志
 # -----------------------------------------------------------------------------
 logging:
@@ -694,7 +925,7 @@ metrics:
   path: "/metrics"
 
 # -----------------------------------------------------------------------------
-# (10) 资源与容量限额（禁止硬编码，全部可配置，需求 R13）
+# (11) 资源与容量限额（禁止硬编码，全部可配置，需求 R13）
 #      任何一项改为 0 或负数都会使限额静默失效，因此配置校验会直接报错。
 # -----------------------------------------------------------------------------
 limits:
@@ -714,7 +945,7 @@ limits:
   max_header_bytes: 1048576
 
 # -----------------------------------------------------------------------------
-# (11) 本地缓存
+# (12) 本地缓存
 # -----------------------------------------------------------------------------
 cache:
   enabled: true

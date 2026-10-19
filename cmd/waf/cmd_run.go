@@ -8,17 +8,17 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/weiyongkang/waf/internal/config"
 	"github.com/weiyongkang/waf/internal/core"
+	"github.com/weiyongkang/waf/internal/db"
 	"github.com/weiyongkang/waf/internal/ingress/forwardauth"
 	"github.com/weiyongkang/waf/internal/logging"
 	"github.com/weiyongkang/waf/internal/observe"
-	"github.com/weiyongkang/waf/internal/pipeline"
 	"github.com/weiyongkang/waf/internal/server"
-	"github.com/weiyongkang/waf/internal/sites"
 	"github.com/weiyongkang/waf/internal/version"
 )
 
@@ -33,7 +33,7 @@ import (
 // 共享存储与内部封禁（T10）已接入；检测引擎（T13，M1.5）与
 // Prometheus 指标（T16，M1.5）将在后续里程碑在此处继续装配。
 func runServe(args []string, stdout, stderr io.Writer) int {
-	resolved, _, code := loadResolved(args, stderr, "waf run")
+	resolved, flagSet, code := loadResolved(args, stderr, "waf run")
 	if code != exitOK {
 		return code
 	}
@@ -100,12 +100,33 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		}
 	}()
 
-	// 站点解析（T14，需求 R6）：把 sites[] 声明编译成可快速匹配的站点表。
-	// 装配失败属于配置问题（重名、重复 Host、非法通配模式），必须 fail fast。
-	siteResolver, err := sites.New(sites.Options{Declared: cfg.Sites})
-	if err != nil {
-		fmt.Fprintf(stderr, "站点策略装配失败：%v\n", err)
-		return exitConfigError
+	// 数据库启用时，站点、IP 名单、封禁策略与关键标量策略以数据库为准。
+	// 这里在任何运行期组件装配之前完成覆盖，保证启动与后续热重载看到同一份配置。
+	if stack.database != nil {
+		cfg = stack.applyConfig(cfg)
+		if err := config.Validate(cfg); err != nil {
+			fmt.Fprintf(stderr, "数据库运营策略校验失败：%v\n", err)
+			return exitConfigError
+		}
+	}
+
+	// 请求审计是可选旁路能力；关闭时使用 Noop，不引入任何队列与磁盘写。
+	auditSink := core.AuditSink(core.NoopAuditSink{})
+	if stack.database != nil {
+		auditWriter, err := db.NewAuditWriter(stack.database, cfg.Database.Audit, loggers.System)
+		if err != nil {
+			fmt.Fprintf(stderr, "审计写入器装配失败：%v\n", err)
+			return exitConfigError
+		}
+		if auditWriter != nil {
+			auditSink = auditWriter
+			// 该 defer 晚于 stack.Close 注册，因此先于数据库关闭执行，保证队列排空。
+			defer func() {
+				if err := auditWriter.Close(); err != nil {
+					loggers.System.Error("审计写入器关闭失败", "error", err.Error())
+				}
+			}()
+		}
 	}
 
 	// 告警外送（T18，需求 P1-7）：
@@ -123,62 +144,43 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	// 这里的 defer 注册早于「日志关闭」的 defer，因此按 LIFO 顺序正好满足该要求。
 	defer closeAlerts(context.Background(), alerts, 3*cfg.Notify.Timeout.Duration(), loggers.System)
 
-	// 依赖集合：校验单元通过它获取日志、共享存储、指标、时间源与站点策略。
-	deps := &core.Deps{
-		SystemLogger: loggers.System,
-		AccessLogger: loggers.Access,
-		Stores:       stack.stores,
-		Bans:         stack.bans,
-		Metrics:      metrics,
-		Alerts:       alerts,
-		Clock:        core.SystemClock{},
-		Limits: core.Limits{
-			MaxHeaderBytes:     cfg.Limits.MaxHeaderBytes,
-			MaxScanTokenBytes:  cfg.Limits.MaxScanTokenBytes,
-			MaxIntelFileBytes:  cfg.Limits.MaxIntelFileBytes,
-			MaxRuleFileBytes:   cfg.Limits.MaxRuleFileBytes,
-			MaxRulesTotalBytes: cfg.Limits.MaxRulesTotalBytes,
-		},
-		Sites:   siteResolver.Sites(),
-		Engine:  engineSettings(cfg),
-		Version: version.Short(),
-	}
-
-	// 校验链（T7）：enabled=false 的实例会被丢弃；链为空即等价纯放行（需求 R6）。
-	decider, err := pipeline.New(pipeline.Config{
-		Instances: cfg.Pipeline,
-		Body:      cfg.Ingress.Body,
-	}, deps)
+	// 站点、封禁与校验链统一收敛到一处装配，保证启动装配与热重载使用完全相同的规则。
+	runtimeAssembly, err := buildServingRuntime(cfg, stack, loggers, metrics, alerts)
 	if err != nil {
-		fmt.Fprintf(stderr, "校验链装配失败：%v\n", err)
+		fmt.Fprintf(stderr, "%v\n", err)
 		return exitConfigError
 	}
-	defer func() {
-		if err := decider.Close(); err != nil {
-			fmt.Fprintf(stderr, "校验链关闭失败：%v\n", err)
-		}
-	}()
 
 	// HTTP 服务：不传 Responder，由 server 依据 ingress.type 自行构建
 	// （nginx-auth-only 通道需要把对外状态码统一收敛为 403，由 response 头承载真实语义）。
 	httpServer, err := server.New(server.Options{
 		Config:         cfg,
-		Decider:        decider,
+		Decider:        runtimeAssembly.decider,
 		Extractor:      extractor,
-		Metrics:        deps.Metrics,
+		Metrics:        metrics,
 		Alerts:         alerts,
+		Audit:          auditSink,
 		MetricsHandler: observer.Handler(),
 		MetricsPath:    cfg.Metrics.Path,
 		SystemLogger:   loggers.System,
 		AccessLogger:   loggers.Access,
 		Version:        version.Short(),
-		Clock:          deps.Clock,
-		Sites:          siteResolver,
+		Clock:          core.SystemClock{},
+		Sites:          runtimeAssembly.sites,
 	})
 	if err != nil {
+		_ = runtimeAssembly.decider.Close()
 		fmt.Fprintf(stderr, "服务装配失败：%v\n", err)
 		return exitRuntimeError
 	}
+	defer func() {
+		if err := httpServer.Close(); err != nil {
+			fmt.Fprintf(stderr, "校验链关闭失败：%v\n", err)
+		}
+	}()
+
+	decider := runtimeAssembly.decider
+	siteResolver := runtimeAssembly.sites
 
 	loggers.System.Info("WAF 启动",
 		"version", version.Version,
@@ -187,21 +189,25 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		"listen", cfg.Server.Listen,
 		"metrics_listen", cfg.Server.MetricsListen,
 		"ingress_type", extractor.IngressType(),
-		"auth_path", cfg.Ingress.Path,
-		"deny_path", cfg.Ingress.DenyPath,
+		"base_path", cfg.Server.BasePath,
+		"auth_path", config.JoinBasePath(cfg.Server.BasePath, cfg.Ingress.Path),
+		"deny_path", config.JoinBasePath(cfg.Server.BasePath, cfg.Ingress.DenyPath),
 		"trusted_proxies", extractor.TrustedProxies(),
 		"decider", decider.Name(),
 		"pipeline_entries", decider.Entries(),
 		"needs_body", decider.NeedsBody(),
 		"stores", stack.summaries(),
 		"metrics_enabled", observer.Enabled(),
-		"metrics_path", cfg.Metrics.Path,
+		"metrics_path", config.JoinBasePath(cfg.Server.BasePath, cfg.Metrics.Path),
 		"metrics_namespace", cfg.Metrics.Namespace,
-		"ban_key", stack.bans.KeyKind(),
-		"ban_keys", strings.Join(stack.bans.Scopes(), ","),
-		"ban_default_ttl", stack.bans.DefaultTTL().String(),
-		"ban_max_ttl", stack.bans.MaxTTL().String(),
+		"ban_key", runtimeAssembly.bans.KeyKind(),
+		"ban_keys", strings.Join(runtimeAssembly.bans.Scopes(), ","),
+		"ban_default_ttl", runtimeAssembly.bans.DefaultTTL().String(),
+		"ban_max_ttl", runtimeAssembly.bans.MaxTTL().String(),
 		"sites", siteResolver.Names(),
+		"database_enabled", stack.database != nil,
+		"database_path", databasePath(stack),
+		"database_audit_mode", cfg.Database.Audit.Mode,
 		"config_files", len(resolved.Files),
 	)
 
@@ -216,6 +222,56 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// current 同时被配置目录监听与数据库策略轮询更新；所有替换动作串行执行，
+	// 避免两个来源并发重建校验链后互相覆盖。
+	var reloadMu sync.Mutex
+	current := cfg
+
+	if stack.database != nil {
+		interval := cfg.Database.ReloadInterval.Duration()
+		go func() {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					reloadMu.Lock()
+					current = reloadDatabasePolicy(current, stack, loggers, metrics, alerts, httpServer)
+					reloadMu.Unlock()
+				}
+			}
+		}()
+		loggers.System.Info("数据库策略轮询已启用", "path", databasePath(stack), "interval", interval.String())
+	}
+
+	// 只有显式把 -c 指向目录时才启用配置目录监听：单文件模式保持原有启动语义。
+	if len(resolved.ConfigDirs) > 0 {
+		watcher, err := config.NewWatcher(config.WatchOptions{
+			Inputs: resolved.ConfigInputs,
+			Logger: loggers.System,
+		})
+		if err != nil {
+			fmt.Fprintf(stderr, "配置目录监听初始化失败：%v\n", err)
+			return exitConfigError
+		}
+		watchCtx, cancelWatch := context.WithCancel(ctx)
+		watcher.Start(watchCtx, func() {
+			reloadMu.Lock()
+			defer reloadMu.Unlock()
+			current = reloadServedConfig(flagSet, current, stack, loggers, metrics, alerts, httpServer)
+		})
+		defer func() {
+			cancelWatch()
+			watcher.Stop()
+		}()
+		loggers.System.Info("配置目录监听已启用",
+			"dirs", resolved.ConfigDirs,
+			"interval", config.DefaultWatchInterval.String(),
+			"debounce", config.DefaultWatchDebounce.String())
+	}
+
 	if err := httpServer.Run(ctx); err != nil {
 		loggers.System.Error("服务异常退出", "error", err.Error())
 		fmt.Fprintf(stderr, "服务异常退出：%v\n", err)
@@ -224,6 +280,14 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 
 	loggers.System.Info("WAF 已退出")
 	return exitOK
+}
+
+// databasePath 返回启动日志中展示的数据库路径。
+func databasePath(stack *storeStack) string {
+	if stack == nil || stack.database == nil {
+		return ""
+	}
+	return stack.database.Path()
 }
 
 // reportIngressCapabilities 在启动日志中输出接入通道的能力清单与降级风险（设计文档 §3.7）。
@@ -293,6 +357,8 @@ func engineSettings(cfg *config.Config) core.EngineSettings {
 		RuleDataInclude:        engine.Rules.DataInclude,
 		CRSSetup:               engine.Rules.CRSSetup,
 		InlineDirectives:       engine.InlineDirectives,
+		VirtualPatches:         engine.VirtualPatches,
+		VirtualPatchFiles:      engine.VirtualPatchFiles,
 		BodyAccess:             engine.Body.Access,
 		BodyLimitBytes:         engine.Body.LimitBytes,
 		BodyInMemoryLimitBytes: engine.Body.InMemoryLimitBytes,

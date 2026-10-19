@@ -365,7 +365,7 @@ func TestBodyProcessorsRouting(t *testing.T) {
 	// 显式关闭全部映射：不应生成任何路由规则。
 	disabled := testDeps(t).Engine
 	disabled.Processors = []core.BodyProcessorSetting{}
-	if directive := buildDirectives(set, disabled, true, nil); strings.Contains(directive, "ctl:requestBodyProcessor=") {
+	if directive := buildDirectives(set, disabled, true, nil, nil); strings.Contains(directive, "ctl:requestBodyProcessor=") {
 		t.Fatalf("processors 显式为空时不应生成路由指令：\n%s", directive)
 	}
 
@@ -375,7 +375,7 @@ func TestBodyProcessorsRouting(t *testing.T) {
 		{Name: "json", ContentTypes: []string{`^application/json$`}, Enabled: true},
 		{Name: "XML", ContentTypes: []string{`^text/xml$`}, Enabled: false},
 	}
-	directive := buildDirectives(set, jsonOnly, true, nil)
+	directive := buildDirectives(set, jsonOnly, true, nil, nil)
 	if !strings.Contains(directive, "ctl:requestBodyProcessor=JSON") {
 		t.Errorf("启用 JSON 映射时应生成 JSON 路由指令：\n%s", directive)
 	}
@@ -502,7 +502,7 @@ func TestBuildDirectives(t *testing.T) {
 		t.Fatalf("加载内置规则集失败：%v", err)
 	}
 
-	directive := buildDirectives(set, deps.Engine, false, nil)
+	directive := buildDirectives(set, deps.Engine, false, nil, nil)
 
 	expectations := []string{
 		"Include crs-setup.conf",

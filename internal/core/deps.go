@@ -120,6 +120,10 @@ type Limits struct {
 	MaxScanTokenBytes int64
 	// MaxIntelFileBytes 是威胁情报文件大小上限（字节）。
 	MaxIntelFileBytes int64
+	// MaxMMDBBytes 是 GeoIP / ASN MaxMind 数据库文件大小上限（字节）。
+	MaxMMDBBytes int64
+	// MaxConfigFileBytes 是外部配置 / 契约文件（例如 OpenAPI spec）的大小上限（字节）。
+	MaxConfigFileBytes int64
 	// MaxRuleFileBytes 是单个规则文件大小上限（字节）。
 	MaxRuleFileBytes int64
 	// MaxRulesTotalBytes 是规则集总量上限（字节）。

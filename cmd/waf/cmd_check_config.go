@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/weiyongkang/waf/internal/config"
 	"github.com/weiyongkang/waf/internal/core"
 	"github.com/weiyongkang/waf/internal/notify"
+	"github.com/weiyongkang/waf/internal/responder"
 	"github.com/weiyongkang/waf/internal/version"
 )
 
@@ -26,8 +29,31 @@ func runCheckConfig(args []string, stdout, stderr io.Writer) int {
 		return code
 	}
 	cfg := resolved.Config
+	databaseApplied := false
+	if cfg.Database.Enabled {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		var applyErr error
+		cfg, databaseApplied, applyErr = applyDatabaseConfig(ctx, cfg)
+		if applyErr != nil {
+			fmt.Fprintf(stderr, "数据库运营策略校验失败：%v\n", applyErr)
+			return exitConfigError
+		}
+	}
+	if err := responder.ValidateResponderConfig(cfg.Responder); err != nil {
+		fmt.Fprintf(stderr, "拦截响应模板校验失败：%v\n", err)
+		return exitConfigError
+	}
 
 	fmt.Fprintf(stdout, "%s\n\n", version.String())
+	if cfg.Database.Enabled {
+		if databaseApplied {
+			fmt.Fprintln(stdout, "数据库运营策略已叠加（数据库已初始化，运营字段以数据库为准）")
+		} else {
+			fmt.Fprintln(stdout, "数据库尚未初始化，本次仅校验配置文件；首次 waf run 会导入运营数据")
+		}
+		fmt.Fprintln(stdout)
+	}
 
 	if len(resolved.Files) > 0 {
 		fmt.Fprintln(stdout, "已加载的配置文件（按优先级从低到高）：")

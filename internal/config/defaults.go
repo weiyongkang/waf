@@ -20,6 +20,7 @@ func Default() *Config {
 		Server: ServerConfig{
 			Listen:            ":9080",
 			MetricsListen:     ":9090",
+			BasePath:          "",
 			ReadHeaderTimeout: dur(3 * time.Second),
 			ShutdownTimeout:   dur(10 * time.Second),
 		},
@@ -66,12 +67,15 @@ func Default() *Config {
 		Responder: ResponderConfig{
 			Type:           "json",
 			IncludeDetails: false,
+			MaxBodyBytes:   8192,
 			Messages: map[string]string{
 				CodeBlocked:      "请求被安全策略拦截",
 				CodeRateLimited:  "请求过于频繁，请稍后再试",
 				CodeUnauthorized: "需要身份认证",
 				CodeBadRequest:   "请求不符合安全要求",
 				CodeUnavailable:  "安全检测服务暂时不可用",
+				CodeNotFound:     "请求的 WAF 端点不存在",
+				CodeHoneypot:     "已命中蜜罐规则",
 			},
 		},
 		Engine: EngineConfig{
@@ -127,18 +131,23 @@ func Default() *Config {
 			},
 			// CRS 默认异常评分阈值（crs-setup.conf 的默认值同为 5）。
 			AnomalyScoreThreshold: 5,
+			VirtualPatches:        []string{},
+			VirtualPatchFiles:     []string{},
 			Exceptions:            []ExceptionConfig{},
 		},
 		Sites: []SiteConfig{
 			{
-				Name:       "default",
-				Hosts:      []string{"*"},
-				EngineMode: EngineModeInherit,
-				Pipeline:   "default",
+				Name:         "default",
+				Hosts:        []string{"*"},
+				EngineMode:   EngineModeInherit,
+				Pipeline:     "default",
+				AccessAction: "block",
 			},
 		},
 		// 默认为空校验链：未声明任何插件时不产生任何拦截（验收项 A3）。
 		Pipeline: []core.InstanceConfig{},
+		// 具名校验链默认关闭：只有 sites[].pipeline 显式引用时才装配。
+		Pipelines: []PipelineConfig{},
 		Stores: []StoreConfig{
 			{
 				Name:     "default",
@@ -165,6 +174,7 @@ func Default() *Config {
 			Escalate:       false,
 			EscalateSteps:  []core.Duration{dur(30 * time.Minute), dur(2 * time.Hour), dur(24 * time.Hour)},
 			EscalateWindow: dur(24 * time.Hour),
+			RenewOnRepeat:  false,
 		},
 		Notify: NotifyConfig{
 			// 默认关闭：告警外送会向外部系统发送请求，属于「有副作用」的能力，
@@ -243,6 +253,21 @@ func Default() *Config {
 			MaxBytes:         33554432,
 			TTL:              dur(5 * time.Minute),
 		},
+		Database: DatabaseConfig{
+			// 默认关闭：未显式启用时保持原有 stores[] / YAML 行为，
+			// 也避免本地测试或只读容器因自动建库失败而无法启动。
+			Enabled:        false,
+			Path:           "data/waf.db",
+			BusyTimeout:    dur(5 * time.Second),
+			ReloadInterval: dur(10 * time.Second),
+			Audit: DatabaseAuditConfig{
+				Mode:          DatabaseAuditModeEvents,
+				Retention:     dur(30 * 24 * time.Hour),
+				QueueSize:     4096,
+				BatchSize:     100,
+				FlushInterval: dur(1 * time.Second),
+			},
+		},
 	}
 }
 
@@ -317,6 +342,13 @@ const (
 	// StoreOnErrorFallbackLocal 表示存储故障时降级为本地存储。
 	StoreOnErrorFallbackLocal = "fallback_local"
 
+	// DatabaseAuditModeOff 表示不把请求审计写入数据库。
+	DatabaseAuditModeOff = "off"
+	// DatabaseAuditModeEvents 表示只把拦截、观察、蜜罐与异常请求写入数据库。
+	DatabaseAuditModeEvents = "events"
+	// DatabaseAuditModeAll 表示把全部鉴权请求写入数据库。
+	DatabaseAuditModeAll = "all"
+
 	// BanKeyClientIP 表示按客户端 IP 封禁（默认维度）。
 	BanKeyClientIP = "client_ip"
 	// BanKeyClientIPSite 表示按「客户端 IP + 站点」封禁（多站点隔离）。
@@ -343,6 +375,10 @@ const (
 	CodeBadRequest = "WAF_BAD_REQUEST"
 	// CodeUnavailable 表示检测服务不可用。
 	CodeUnavailable = "WAF_UNAVAILABLE"
+	// CodeNotFound 表示 WAF 端点不存在。
+	CodeNotFound = "WAF_NOT_FOUND"
+	// CodeHoneypot 表示命中蜜罐规则（响应体由规则自身定义）。
+	CodeHoneypot = "WAF_HONEYPOT"
 )
 
 // 访问日志中「放行请求」的记录策略（配置项 logging.access.allow_level）。

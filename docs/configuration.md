@@ -34,11 +34,19 @@ CLI 参数  >  配置文件  >  环境变量  >  内置默认值
 ### 1.2 配置文件通道
 
 ```bash
-# 可多次指定；后指定的覆盖先指定的（按优先级从低到高排列）
+# 单文件：可多次指定；后指定的覆盖先指定的（按优先级从低到高排列）
 waf run -c /etc/waf/base.yaml -c /etc/waf/override.yaml
+
+# 目录：按文件名字典序合并；目录与文件也可以混用
+waf run -c /etc/waf/conf.d -c /etc/waf/override.yaml
 ```
 
 - 支持 `.yaml` / `.yml` / `.json`（按扩展名或内容自动识别）。
+- `-c` 可以指向**目录**：只读取该目录第一层的 `.yaml` / `.yml` / `.json`，按文件名字典序依次合并；
+  子目录、隐藏文件（`.` 开头）、`#` 开头与 `~` 结尾的备份/临时文件会被跳过。
+- 目录中没有任何可加载文件时直接报错，避免「以为加载了目录、实际却使用默认值」。
+- 推荐使用数字前缀明确顺序：`10-server.yaml`、`20-ingress.yaml`、`30-responder.yaml`、`40-pipeline.yaml`。
+- 多文件合并遵循 §1.1：映射递归合并，数组（`pipeline` / `sites` / `notifiers`）整体替换。
 - 单文件读取上限由 `limits.max_config_file_bytes` 控制（默认 1 MiB），超出直接失败（需求 R13：禁止大体积读取）。
 - 解码使用 **严格模式**：出现未知字段会报错并退出码 2，避免拼写错误被静默忽略。
 
@@ -76,7 +84,7 @@ WAF_ + <配置路径，全部大写，点号换成下划线>
 
 | 参数 | 说明 |
 | --- | --- |
-| `-c, --config <path>` | 指定配置文件，可重复（后者覆盖前者） |
+| `-c, --config <path>` | 指定配置文件或目录，可重复（后者覆盖前者）；目录按文件名字典序加载 |
 | `--set <路径>=<值>` | 按配置路径覆盖**任意标量**配置项，可重复，例如 `--set server.listen=:9081` |
 
 此外，**每个标量配置项都会被机械注册为一个同名参数**，命名规则为
@@ -98,9 +106,12 @@ WAF_ + <配置路径，全部大写，点号换成下划线>
 | --- | --- | --- |
 | `waf run` | 启动 forward-auth 服务 | 0 正常退出；1 运行期错误；2 配置错误 |
 | `waf check-config` | 校验配置并打印**生效值与来源摘要**（不启动服务） | 0 通过；2 校验失败 |
+| `waf config print` | 输出默认值叠加环境变量/配置文件/CLI 后的配置；数据库已初始化时继续叠加数据库运营策略 | 0 |
 | `waf healthz` | 探活（可指定 `--listen`） | 0 / 1 |
 | `waf version` | 版本 / 提交号 / 构建时间 | 0 |
 | `waf ban list\|add\|del\|flush` | 内部封禁名单运维 | 0 / 1 / 2 |
+| `waf db status` | 查看 SQLite 路径、初始化状态、策略版本与运营数据量 | 0 / 1 / 2 |
+| `waf db import-config [--force]` | 从当前配置导入数据库运营数据；`--force` 覆盖策略但保留封禁与审计 | 0 / 1 / 2 |
 | `waf rules list` | 查看运行态会加载的规则集、引擎参数与**误报例外审计清单** | 0 / 1 / 2 |
 | `waf rules verify --dir <目录>` | 按 `manifest.yaml` 校验规则包完整性（缺失 / 摘要不一致 / 多余文件） | 0 通过；2 缺失或摘要不一致；**3 文件齐全但有清单未声明的多余文件** |
 | `waf rules manifest --dir <目录> --name <名> --package-version <版本>` | 为规则目录生成 `manifest.yaml` | 0 / 1 / 2 |
@@ -132,6 +143,55 @@ WAF_ + <配置路径，全部大写，点号换成下划线>
 2. **配置项来源摘要**（每个被显式设置的键，标注来自 file / env / flag）；
 3. **生效配置**（合并后的最终 YAML）。
 
+### 1.5 配置目录与运行期热重载
+
+当 `-c` 指向目录时，`waf run` 会自动监听该配置输入（轮询间隔 2s、去抖动 500ms）。检测到文件内容、
+新增或删除后，会重新执行完整的配置加载流程：
+
+```
+内置默认值 -> 环境变量 -> 目录内配置文件（字典序）-> CLI
+```
+
+加载或校验失败时只写 ERROR 日志，正在服务的旧配置继续生效，不会出现「改错一个字段导致 WAF 失去防护」。
+应用成功后会输出「配置热重载成功」，并带上文件数、校验链条目数、站点与封禁策略摘要。
+
+可在运行期安全替换的配置段：
+
+| 配置段 | 说明 |
+| --- | --- |
+| `pipeline` | 重建校验链 |
+| `sites` | 重建站点匹配表 |
+| `ban` | 重建封禁策略（复用现有共享存储） |
+| `responder` | 重建 JSON 响应模板与文案 |
+| `engine` | 校验链内重建 Coraza 引擎与规则参数 |
+
+必须重启才能生效的配置段：`version`、`server`、`ingress`、`stores`、`database`、
+`notify` / `notifiers`、`logging`、`metrics`、`limits`、`cache`。如果一次修改同时包含可热加载段与重启段，整次重载会被拒绝，
+并在日志中列出 `restart_required`，避免只应用一半而形成不一致状态。
+
+启用 `database` 后，运行实例还会按 `database.reload_interval` 轮询策略版本。数据库中的
+`site_policies`、`ip_lists`、`policy_settings` 变化后会自动重建 `pipeline` / `sites` / `ban` /
+`responder` / `engine` 快照；YAML 修改这些数据库拥有的字段不会覆盖数据库值。
+
+`waf config print` 与 `waf run` 使用同一套三通道叠加逻辑，因此可以用它确认目录合并、环境变量与 CLI 的最终结果。
+未显式传入 `-c` 时，`config print` 不自动读取 `/etc/waf/waf.yaml`，保持「内置默认值 + 环境变量 + CLI」的可复现语义：
+
+```bash
+WAF_ENGINE_MODE=detection_only waf config print -c /etc/waf/conf.d --ban-default-ttl 2h
+```
+
+> 注意：热重载只监听**显式传给 `-c` 的目录**；单文件模式保持原有启动语义，不做运行期监听。
+> 修改响应模板文件（`responder.template_file`）本身不会触发目录监听，需再修改目录内任一配置文件，
+> 或等待其它配置变更触发重载。
+
+`waf config print` 的完整优先级为：
+
+```
+数据库运营策略（已初始化时） > CLI > 配置文件 > 环境变量 > 内置默认值
+```
+
+数据库文件不存在或尚未完成首次导入时，`config print` 不会隐式创建数据库，仍输出 YAML 配置结果。
+
 ---
 
 ## 2. 全量配置项
@@ -144,8 +204,14 @@ WAF_ + <配置路径，全部大写，点号换成下划线>
 | --- | --- | --- | --- |
 | `server.listen` | string | `:9080` | 鉴权端点监听地址 |
 | `server.metrics_listen` | string | `:9090` | `/metrics`、`/healthz`、`/readyz` 的独立监听地址（便于网络隔离） |
+| `server.base_path` | string | `-` | 所有 WAF HTTP 端点的统一前缀（如 `/gateway`）；为空表示不加前缀 |
 | `server.read_header_timeout` | duration | `3s` | 读取请求头超时，防慢速攻击 |
 | `server.shutdown_timeout` | duration | `10s` | 优雅关停最长等待时间 |
+
+> `server.base_path` 会同时作用于 `ingress.path`、`ingress.deny_path`、`/healthz`、`/readyz`、
+> `/metrics` 与 `/version`。拼接是幂等的：旧配置里已经写成 `/gateway/waf/auth` 的路径不会重复加前缀。
+> 启用前缀后，代理侧 `forwardAuth.address` / `auth_request` 与 `errors` 回源地址必须同步修改；
+> 配置校验会比较**叠加前缀后的最终路径**，重复路径会在启动前直接报错。
 
 ### 2.2 `ingress` — 接入还原
 
@@ -245,6 +311,9 @@ WAF_ + <配置路径，全部大写，点号换成下划线>
 | `responder.type` | string | `json` | 响应渲染实现类型 |
 | `responder.include_details` | bool | `false` | 是否在错误体里暴露 `rule_id` / `check` / `score`；默认关闭，避免向攻击者泄露检测细节 |
 | `responder.messages.<CODE>` | map | 中文文案 | 错误码 → 提示语，可自定义 |
+| `responder.template` | string | `-` | 内联 JSON 响应模板（Go `text/template`）；与 `template_file` 二选一 |
+| `responder.template_file` | string | `-` | 外部模板文件路径；与 `template` 二选一，文件上限 64 KiB |
+| `responder.max_body_bytes` | int | `8192` | 模板渲染结果字节上限；`<=0` 时使用默认值 |
 
 对外错误码：
 
@@ -255,6 +324,48 @@ WAF_ + <配置路径，全部大写，点号换成下划线>
 | `WAF_UNAUTHORIZED` | 需要身份认证 | 401 |
 | `WAF_BAD_REQUEST` | 请求不符合安全要求 | 400 |
 | `WAF_UNAVAILABLE` | 检测服务不可用（失败关闭） | 503 |
+| `WAF_NOT_FOUND` | 请求的 WAF 端点不存在（包括前缀外的路径） | 404 |
+
+#### `responder.template` — 自定义拦截 JSON
+
+模板使用 Go 标准库 `text/template`（不是 `html/template`），启动阶段和 `waf check-config`
+都会用样例数据渲染一次并校验输出必须是合法 JSON。模板可用字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `.Code` / `.Status` | 对外错误码与本次响应的 HTTP 状态码 |
+| `.Message` | 错误码对应的提示语（来自 `responder.messages`） |
+| `.RequestID` / `.Timestamp` | 请求标识与响应时间 |
+| `.Verdict` / `.Site` | 判定结论与命中的站点名 |
+| `.Path` / `.ClientIP` | 原始请求路径与客户端 IP（404 渲染同样可用） |
+| `.Check` / `.RuleID` / `.Score` | 产生结论的校验单元、命中规则与评分 |
+| `.RetryAfter` | 限速场景的建议退避秒数 |
+| `.HasDetails` / `.Details` | 是否输出检测细节；仅在 `include_details=true` 时为真 |
+| `.Messages` | 完整的错误码到提示语映射 |
+
+字符串字段必须通过 `json` 函数输出，否则引号 / 中文 / 特殊字符可能生成非法 JSON：
+
+```yaml
+responder:
+  include_details: false
+  template: |
+    {
+      "code": {{ .Code | json }},
+      "message": {{ .Message | json }},
+      "request_id": {{ .RequestID | json }},
+      "timestamp": {{ .Timestamp | json }}
+      {{- if .HasDetails }},
+      "details": {
+        "check": {{ .Check | json }},
+        "rule_id": {{ .RuleID | json }},
+        "score": {{ .Score }}
+      }
+      {{- end }}
+    }
+```
+
+模板运行期渲染失败（例如超过 `max_body_bytes` 或输出不是合法 JSON）会记录 WARN 并回退到内置
+`ErrorBody` 结构，保证错误响应本身不会失效。
 
 **鉴权响应头送达方案（需求 R22）**：因为 forward-auth 下代理会丢弃鉴权响应体，
 真实语义通过响应头回传，代理侧据此重写状态码：
@@ -262,8 +373,10 @@ WAF_ + <配置路径，全部大写，点号换成下划线>
 | 响应头 | 含义 |
 | --- | --- |
 | `X-WAF-Code` | **核心**：对外错误码（`WAF_BLOCKED` / `WAF_RATE_LIMITED` / ...） |
-| `X-WAF-Verdict` | 判定结论（`allow` / `block` / `ratelimit` / `bad_request` / `unauthorized` / `unavailable`） |
+| `X-WAF-Verdict` | 判定结论（`allow` / `block` / `ratelimit` / `bad_request` / `unauthorized` / `unavailable` / `honeypot`） |
 | `X-WAF-Rule-Id` | 命中的规则标识（便于排障与误报申诉） |
+| `X-WAF-Target` | 触发拦截 / 封禁的检测目标，例如 `ARGS:id`、`REQUEST_URI`、`client_ip+path` |
+| `X-WAF-Ban-Scope` | 导致本次拦截的封禁维度；普通规则拦截时为空 |
 | `X-WAF-Request-Id` | 请求标识，用于把代理侧渲染的错误关联到访问日志 |
 | `X-WAF-Site` | 命中站点名 |
 | `X-WAF-Version` | WAF 版本 |
@@ -279,9 +392,14 @@ auth_request_set $waf_code $upstream_http_x_waf_code;
 > 因此 `nginx-auth-only` 通道下 WAF 对外统一返回 `403`，
 > 由 `X-WAF-Code` 承载真实语义，代理侧再据此渲染对外响应（需求 R22）。
 
-**`/waf/deny` 渲染端点**：Traefik 的 `errors` 中间件回源调用该端点，
-它既接受错误码字面量（`?code=WAF_BLOCKED`），也接受数字状态码（`{status}`），
-并返回「真实语义」的状态码，从而让调用方看到 403 / 429 而不是被代理统一改写后的状态码。
+**`/waf/deny` 渲染端点**：Traefik `errors`、Nginx `error_page` 与 OpenResty
+`/__waf_deny` 都回源调用该端点。它既接受错误码字面量（`?code=WAF_BLOCKED`），
+也接受数字状态码（`{status}`）；对 `WAF_HONEYPOT`、403、418 或空 code 会按
+`X-Forwarded-Uri` / `X-Forwarded-Method` 重新匹配蜜罐规则，命中时返回规则定义的
+状态码、响应头与正文，未命中时返回「真实语义」的 JSON 错误体。
+渲染端点也接受查询参数或同名请求头 `target` / `X-WAF-Target`、
+`ban_scope` / `X-WAF-Ban-Scope`，并把它们写入最终响应头与响应模板；
+`uri` 缺失时回退读取 `X-Forwarded-Uri` / `X-Original-URI`。
 
 ### 2.4 `engine` — 检测引擎（Coraza + CRS）
 
@@ -292,6 +410,8 @@ auth_request_set $waf_code $upstream_http_x_waf_code;
 | `engine.paranoia_level` | int | `1` | CRS 偏执等级 1–4；等级 1 时不会注入覆盖动作（CRS 默认值） |
 | `engine.anomaly_score_threshold` | int | `5` | 入站异常评分阈值（CRS 默认 5）；同一个数字用于三处，见下 |
 | `engine.exceptions` | []object | `[]` | 误报例外清单，见下 |
+| `engine.virtual_patches` | []string | `[]` | 启用的内置虚拟补丁模板 ID 或 CVE 编号 |
+| `engine.virtual_patch_files` | []string | `[]` | 自定义 SecLang 虚拟补丁文件（`.conf`） |
 
 **`engine.anomaly_score_threshold` 的三处用途**（把阈值提到 `engine` 段正是为了让三处永不脱节）：
 
@@ -406,13 +526,34 @@ engine:
 > 顺序很关键：SecLang 是「后写覆盖先写」。写在这里的指令能压过 `crs-setup.conf` 与引擎基础设置，
 > 但会被规则文件里的规则影响。典型的用途是补 `SecRuleRemoveById`、`SecRequestBodyLimit` 等。
 
+#### `engine.virtual_patches` — 虚拟补丁
+
+虚拟补丁在规则文件之后、全局例外之前加载，因此既能独立命中，也能继续被
+`engine.exceptions` 治理。内置模板：
+
+| 模板 | CVE | 检测内容 |
+| --- | --- | --- |
+| `cve-2021-44228` | CVE-2021-44228 | `${jndi:...}` Log4Shell 注入 |
+| `cve-2022-22965` | CVE-2022-22965 | Spring4Shell `class.module.classLoader` 链 |
+| `cve-2021-41773` | CVE-2021-41773 | Apache 路径穿越变体 |
+| `cve-2024-3400` | CVE-2024-3400 | PAN-OS SESSID 命令注入 |
+
+```yaml
+engine:
+  virtual_patches: ["cve-2021-44228", "cve-2022-22965"]
+  virtual_patch_files: ["/etc/waf/vpatch/custom.conf"]
+```
+
+自定义文件每行一条 SecLang 指令，空行与 `#` 注释会被忽略；单文件大小受
+`limits.max_rule_file_bytes` 限制。模板名写错会在 `waf check-config` 阶段直接报错。
+
 #### `engine.hot_reload`
 
 | 配置项 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `enabled` | bool | `true` | 规则目录变化时自动重载（重载失败会保留旧引擎继续服务） |
+| `enabled` | bool | `true` | 规则目录变化时自动重载（CRS 与蜜罐共用；重载失败会保留旧规则继续服务） |
 | `debounce` | duration | `1s` | 变化去抖时间：指纹变化后再等一个周期复核，避免编辑器/打包工具「边写边改」触发多次重载 |
-| `poll_interval` | duration | `5s` | 规则目录指纹的轮询间隔 |
+| `poll_interval` | duration | `5s` | 规则目录指纹的扫描/轮询间隔（CRS 与蜜罐共用） |
 | `marker_file` | string | `-` | 「手动触发重载」的标记文件路径；`waf rules reload` 会更新其时间戳，实例据此立即重载 |
 
 **为什么用轮询指纹而不是 inotify / ReadDirectoryChangesW（设计取舍，已记录于 roadmap §10.9）**：
@@ -424,14 +565,28 @@ engine:
 指纹由「相对路径 + 大小 + 修改时间（纳秒）」排序后取 SHA-256。**必须包含修改时间**：
 只比大小会漏掉「等长内容替换」（例如把规则里的评分阈值从 5 改成 8），而修改时间能捕捉到它。
 
+监听范围：
+
+- CRS：`engine.rules.dirs` + `engine.rules.custom_dirs`，按 `engine.rules.include` / `data_include` 匹配；
+- 蜜罐：`pipeline[].settings.rules_dir`，递归监听所有子目录中的 `.yaml` / `.yml`；
+- GeoIP / 威胁情报 / OpenAPI 契约：分别由插件的 `hot_reload` + `poll_interval` /
+  `refresh_interval` 独立扫描，失败时保留旧快照。
+
+两者都受 `engine.hot_reload` 控制，因此更新路径下的规则文件后无需重启；
+`waf rules reload` 也会通过同一个 `marker_file` 同时触发两类规则重载。
+
 ### 2.5 `sites` — 站点策略
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `name` | string | 站点名，全局唯一 |
 | `hosts` | []string | Host 模式：精确域名、`*.example.com` 通配、`"*"` 兜底 |
-| `engine_mode` | enum | `inherit` 继承全局 / `on` / `detection_only`。⚠️ **当前运行期未生效**（只做校验与解析）：实测站点写 `detection_only` 仍按全局 `engine.mode` 拦截，站点级灰度请用「单独实例 + 代理按 Host 分流」；全局灰度配方见 `docs/dev-guide.md` §3.6 |
-| `pipeline` | string | 站点级校验链名（多链灰度预留，当前各站点共用全局 `pipeline`） |
+| `engine_mode` | enum | `inherit` 继承全局 / `on` / `detection_only`。运行期通过 phase 1 的 `ctl:ruleEngine` 事务级覆盖生效，同一份规则可同时服务不同站点 |
+| `pipeline` | string | `default` 使用顶层 `pipeline`；其它值引用 `pipelines[]` 中的具名链 |
+| `allowlist` | []string | 站点级 IP / CIDR 白名单；命中直接放行 |
+| `blocklist` | []string | 站点级 IP / CIDR 黑名单；命中按 `access_action` 处理 |
+| `access_action` | enum | 黑名单动作：`block`（默认）/ `observe` |
+| `access_score` | int | 黑名单命中时累加的异常评分 |
 | `params` | map | 站点级参数覆盖，键名为 `<插件类型>.<参数名>` |
 
 **匹配优先级**：精确 Host > 最长通配后缀 > `"*"` 站点 > 内置默认站点。
@@ -441,13 +596,36 @@ engine:
 **约束（启动阶段 fail fast）**：站点名重复 / 无 `hosts` / 多个 `"*"` / `"*"` 与其它模式混用 /
 通配形态非法 / 同一 Host 被多个站点声明。
 
-当前已支持的 `params` 键（`internal/check/ratelimit`）：
+当前已支持的 `params` 键：
 
 ```yaml
 params:
   ratelimit.limit: "300"
   ratelimit.burst: "30"
   ratelimit.window: "60s"
+  geoip.action: "observe"
+  geoip.allow_countries: "CN,HK"
+  geoip.block_countries: "KP"
+  threatintel.action: "block"
+  threatintel.score: "20"
+  apisec.action: "observe"
+  apisec.unknown_action: "off"
+  challenge.mode: "basic"
+  challenge.realm: "shop-admin"
+```
+
+站点级链路与 IP 名单：
+
+```yaml
+sites:
+  - name: shop
+    hosts: ["shop.example.com"]
+    engine_mode: detection_only
+    pipeline: shop-strict
+    allowlist: ["203.0.113.10/32"]
+    blocklist: ["198.51.100.0/24"]
+    access_action: block
+    access_score: 10
 ```
 
 ### 2.6 `pipeline` — 校验链
@@ -476,6 +654,33 @@ pipeline:
 
 > `post` 阶段具有**收尾语义**：即使链在中途短路（已拦截），`post` 单元仍会全部执行，
 > 否则「命中即拦截」无法触发自动封禁与告警。
+
+### 2.6.1 `pipelines` — 具名校验链
+
+顶层 `pipeline` 始终是默认链；`pipelines[]` 声明可被 `sites[].pipeline` 引用的独立链。
+具名链在启动阶段分别构建，请求期只做一次 map 查找。
+
+```yaml
+pipelines:
+  - name: shop-strict
+    instances:
+      - name: shop-challenge
+        type: challenge
+        enabled: true
+        order: 10
+        phase: request
+        settings:
+          mode: basic
+          users: [{ username: shop, password_sha256: "..." }]
+      - name: shop-apisec
+        type: apisec
+        enabled: true
+        order: 20
+        phase: body
+        settings: { spec_file: /etc/waf/shop-openapi.yaml }
+```
+
+约束：链名唯一、不能使用保留名 `default`；所有链中的实例 `name` 必须全局唯一。
 
 ### 2.7 `stores` — 共享状态存储
 
@@ -507,6 +712,52 @@ pipeline:
 > **需求 R23**：Redis 共享必须显式启用（`enabled: true`）；未启用时降级为本地存储，
 > 启动日志会输出 WARN 提示「多实例之间不会共享限速计数与封禁名单」。
 
+### 2.7.1 `database` — 运行期 SQLite 持久化
+
+数据库用于保存**运营数据**，不是部署配置的第二份副本。
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `database.enabled` | bool | `false` | 是否启用 SQLite；关闭时保持原有 stores / YAML 行为 |
+| `database.path` | string | `data/waf.db` | SQLite 文件路径；父目录不存在时自动创建 |
+| `database.busy_timeout` | duration | `5s` | 写锁等待时间 |
+| `database.reload_interval` | duration | `10s` | 策略版本轮询间隔 |
+| `database.audit.mode` | enum | `events` | `off` / `events` / `all` |
+| `database.audit.retention` | duration | `720h` | 审计保留时长；`0` 表示不自动清理 |
+| `database.audit.queue_size` | int | `4096` | 审计异步队列长度，满时丢弃且不阻塞请求 |
+| `database.audit.batch_size` | int | `100` | 单事务最多写入条数 |
+| `database.audit.flush_interval` | duration | `1s` | 队列空闲时的最大等待时间 |
+
+**数据边界**：
+
+| 保存到 SQLite | 始终以 YAML / 环境变量 / CLI 为准 |
+| --- | --- |
+| 封禁记录与封禁事件 | `server` / `ingress` / `stores` / `database.path` |
+| 站点策略、站点 IP 名单 | Redis 连接、规则目录、MMDB 路径、模板文件路径 |
+| `ipaccess` 名单（含 `blocklist_file` 首次导入） | 日志、指标、limits、cache、密钥 |
+| `ban` / `engine` / `responder` 的关键标量策略 | 告警通道与部署监听地址 |
+| 请求审计（可选） | 规则内容、OpenAPI 文件与蜜罐规则目录 |
+
+**初始化与覆盖规则**：
+
+1. 首次启用时从当前生效配置导入；`ipaccess.blocklist_file` 只在该次导入时读取。
+2. 之后每次启动不再解析导入文件，也不再覆盖数据库中的运营数据。
+3. 需要重新导入时执行 `waf db import-config --force`；封禁记录、封禁事件与审计记录始终保留。
+4. 数据库中的策略变化通过 `policy_revision` 触发运行期热重载；修改数据库字段后应同步递增该版本，
+   或使用 `waf db import-config --force`。
+5. 封禁记录使用 Unix 毫秒保存首次封禁时间与到期时间；重复命中不会续期，到期后查询路径自动解封。
+
+**为什么限速计数不落库**：限速与累进封禁计数是高频、短周期易失状态，写入 SQLite 会把每个请求
+变成磁盘写热点；它们继续使用 `stores[]`（Redis / memory / file）。SQLite 只承接需要跨重启保留的
+封禁事实与运营策略。
+
+**结构化封禁 / 拒绝上下文**：`bans`、`ban_events` 与 `audit_requests` 会保存
+`rule_id`、`check_name`、`target`、`ban_scope`、完整 `uri`、`query_text` 与 `params_json`。
+参数快照只包含查询串以及已缓冲的 JSON / form 请求体，正文超过
+`logging.access.max_body_snippet_bytes` 时标记截断；`password`、`token`、`secret`、
+`authorization`、`cookie`、`session` 等敏感字段在落库与日志前统一替换为 `[REDACTED]`。
+旧数据库启动时会自动补齐这些列，无需手工迁移。
+
 ### 2.8 `ban` — 内部封禁策略
 
 **仅在本 WAF 内部生效，不执行任何系统防火墙操作**（需求 R18：代码中禁用 `os/exec`）。
@@ -520,6 +771,12 @@ pipeline:
 | `ban.escalate` | bool | `false` | 是否启用累进封禁 |
 | `ban.escalate_steps` | []duration | `[30m, 2h, 24h]` | 累进阶梯 |
 | `ban.escalate_window` | duration | `24h` | 累进统计窗口 |
+| `ban.renew_on_repeat` | bool | `false` | 重复命中时是否刷新已有封禁的到期时间 |
+
+> **封禁计时语义**：默认 `renew_on_repeat=false`。自动封禁在**首次写入时**确定
+> `banned_at` / `expire_at`，封禁有效期内相同来源再次触发只记录日志，不刷新到期时间、
+> 不新增名单记录；到期后自动解封，下一次封禁再从当前时刻重新计时。只有显式设置
+> `renew_on_repeat=true` 才会恢复「每次命中都续期」的旧行为；手工 `waf ban add` 始终是强制覆盖/续期。
 
 #### 封禁维度（`ban_key` / `ban_keys`）
 
@@ -684,7 +941,7 @@ pipeline:
 >   无需同时修改 `level`；把 `allow_level` 改回 `info` 或把 `level` 调粗即可恢复；
 > - `off`：完全不记录放行，只保留拦截 / 观察 / 异常记录（仅适用于极端高频、日志体积优先的链路）。
 >
-> 每条访问日志都带 `action` 字段（`allow` / `block` / `observe` / `error`），
+> 每条访问日志都带 `action` 字段（`allow` / `block` / `observe` / `honeypot` / `error`），
 > 便于直接 `grep` 或做聚合统计，不必再从 `msg` 文案反推判定类型。
 
 ### 2.11 `metrics` — 指标
@@ -801,7 +1058,7 @@ pipeline:
 
 | 键 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
-| `trigger_on` | []string | `[block]` | 计入触发条件的判定结论；`any` 表示任何终态 |
+| `trigger_on` | []string | `[block, honeypot]` | 计入触发条件的判定结论；`any` 表示任何终态。蜜罐命中默认参与窗口计数 |
 | `min_severity` | enum | `-`（不设门槛） | 最低命中严重度：`info` / `low` / `medium` / `high` / `critical`；只有存在该级别及以上的命中才计入 |
 | `dimensions` | []object | 单个 `client_ip` | **触发维度列表**（见下）；为空等价于单一的 `client_ip` 维度 |
 | `dimensions[].scope` | enum | `client_ip` | 维度：`client_ip` / `client_ip+site` / `client_ip+path` / `client_ip+method`；**必须已在 `ban.ban_keys` 中启用** |
@@ -821,6 +1078,9 @@ pipeline:
 
 计数键格式：`ab:<维度>|<封禁键>|<窗口>`（维度与窗口都编进键名：不同维度的计数互不污染，
 调整窗口后也不会沿用旧计数）。
+
+蜜罐命中与 `block` / `ratelimit` 等触发结论在同一维度、同一窗口下统一累计，
+因此 `threshold` 与 `window` 同时约束所有列入 `trigger_on` 的结论。
 
 > `skip_when_banned` 的「已封禁」判定读取的是 `settings.store` 指定的存储。
 > 若它与封禁写入使用的存储不是同一个实例，最坏结果只是退化为「每次都重新计数」，
@@ -879,6 +1139,226 @@ settings:
 > **注意**：两个实例都会执行 Coraza 的 phase 2（请求体阶段）求值——
 > 这是 CRS 攻击规则（941xxx / 942xxx 等）与查询串参数（`ARGS`）的检测位置；
 > 头实例不写入任何请求体字节，只触发求值，因此不违背按需读体约束。
+
+### 3.8 `honeypot`（PhasePre）
+
+把诱饵端点集中到 WAF 内：规则命中后按规则自己的状态码、响应头与正文响应，
+不再走统一 JSON 拦截模板。匹配与返回语义参考 `reference/honeypot` 的 baitroute：
+**规则按声明顺序匹配、首个命中短路、未命中继续执行后续校验单元**。
+
+响应分两步完成，以便 Traefik、Nginx 原生与 OpenResty 共用同一套实现：
+
+1. `/waf/auth` 命中后只返回 `403` 与 `X-WAF-Code: WAF_HONEYPOT` 等元数据，不携带正文；
+2. 代理侧调用 `/waf/deny?code=WAF_HONEYPOT`（Traefik 传 `code=403`），
+   WAF 按 `X-Forwarded-Uri` / `X-Forwarded-Method` 重新匹配规则，返回最终状态码、响应头与正文。
+
+| 键 | 类型 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `rules` | []object | `[]` | 内联规则列表，顺序即匹配顺序 |
+| `rules_dir` | string | `-` | 规则目录，递归读取 `.yaml` / `.yml`；按文件路径字典序加载，排在内联规则之后。配置后由 `engine.hot_reload` 自动监听目录变化（递归，包含子目录），加载失败保留旧规则 |
+| `score` | int | `0` | 命中时累加的异常评分（可供 `threshold` / `autoban` 使用） |
+| `alert` | bool | `true` | 是否产生告警事件（经 `notify` 通道外送） |
+
+单条规则字段：
+
+| 键 | 类型 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `name` | string | 自动生成 | 规则名；为空时内联规则为 `rule-N`，目录规则为 `相对路径#N` |
+| `method` | string | 任意 | 单个请求方法；为空且 `methods` 也为空时匹配任意方法 |
+| `methods` | []string | `[]` | 多个请求方法，与 `method` 合并 |
+| `path` | string | 必填 | 匹配表达式 |
+| `match` | enum | `exact` | `exact` / `prefix` / `glob` / `regex`；`glob` 使用 `path.Match`，`regex` 不做自动锚定 |
+| `target` | enum | `path` | `path`（不含查询串）/ `uri`（含查询串）；exact 模式的 `path` 含 `?` 时自动使用 `uri` |
+| `status` | int | `200` | 返回状态码，必须为 200–599 |
+| `content_type` | string | `text/plain; charset=utf-8` | 返回的 Content-Type；兼容参考规则的 `content-type` 写法 |
+| `headers` | map | `{}` | 附加响应头；禁止 `Content-Length` / `Transfer-Encoding` 等逐跳头 |
+| `body` | string | `""` | 响应正文原文；`204` / `304` 不允许携带正文 |
+
+示例：
+
+```yaml
+pipeline:
+  - name: honeypot
+    type: honeypot
+    enabled: true
+    order: 1
+    phase: pre
+    on_error: pass
+    settings:
+      score: 10
+      alert: true
+      rules:
+        - name: phpinfo
+          method: GET
+          path: /phpinfo.php
+          status: 200
+          content_type: text/html
+          headers:
+            Server: Apache/2.4.59
+            X-Powered-By: PHP/8.2.17
+          body: |
+            <!DOCTYPE html><html><body><h1>PHP Version 8.2.17</h1></body></html>
+```
+
+也可以直接复用参考规则目录：
+
+```yaml
+settings:
+  rules_dir: /etc/waf/honeypot-rules   # 递归读取 .yaml / .yml
+```
+
+命中时结论为 `honeypot`，响应头携带 `X-WAF-Code: WAF_HONEYPOT` 与
+`X-WAF-Verdict: honeypot`；访问日志 `action=honeypot`，不会计入
+`waf_blocked_total`。蜜罐命中默认会由 `autoban` 按维度写入窗口计数
+（`trigger_on` 默认包含 `honeypot`），达到 `threshold` 后按 `ttl` 封禁。
+若显式配置了 `trigger_on`，必须把 `honeypot` 列入（或使用 `any`），例如：
+
+```yaml
+trigger_on: [block, ratelimit, honeypot]
+threshold: 3
+window: 5m
+ttl: 30m
+```
+
+> **代理通道（三通道统一）**
+>
+> - OpenResty：`waf_auth.lua` 识别 `WAF_HONEYPOT` 后回源 `/__waf_deny`，
+>   由 `/waf/deny` 返回最终页面；
+> - Traefik：`errors` 中间件捕获 403 后回源 `/waf/deny?code=403`；
+>   `errors` 无法读取鉴权响应头，因此 WAF 对 403 执行一次蜜罐重匹配；
+> - Nginx 原生 `auth_request`：`auth_request` 丢弃鉴权响应体，但
+>   `error_page ... = @waf_render` 回源 `/waf/deny?code=$waf_code` 后返回最终页面。
+>
+> 三个通道都支持 `status: 200` 的伪造页面。代理必须传递原始请求信息：
+> `X-Forwarded-Uri`、`X-Forwarded-Method`、`X-Forwarded-Host`、`X-Real-IP`
+> （或对应的 `X-Original-*` 候选头）。渲染端点只重新匹配蜜罐规则，
+> 不重复执行限速、封禁或 CRS 检测。
+
+### 3.9 `geoip`（PhaseRequest）
+
+只读取本地 MaxMind MMDB（GeoLite2 Country / City），不访问任何云端 GeoIP API。
+白名单优先于黑名单；命中黑名单后按 `action` 拦截或观察。
+
+| 键 | 类型 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `database` | string | 必填 | 本地 `GeoLite2-Country.mmdb` / `GeoLite2-City.mmdb` |
+| `action` | enum | `block` | `block` / `observe` |
+| `score` | int | `0` | 命中时累加的异常评分 |
+| `rule_id` | string | `geoip_country_block` | 命中明细规则标识 |
+| `allow_countries` | []string | `[]` | 放行国家代码（ISO 两位） |
+| `block_countries` | []string | `[]` | 拦截国家代码 |
+| `allow_continents` | []string | `[]` | 放行洲代码（例如 `AS` / `EU`） |
+| `block_continents` | []string | `[]` | 拦截洲代码 |
+| `hot_reload` | bool | `true` | 是否轮询 MMDB 文件变化 |
+| `poll_interval` | duration | `5s` | 文件指纹扫描间隔 |
+
+至少配置一个 allow/block 名单；空名单会让实例静默失效，因此启动阶段直接报错。
+私有地址、回环地址与未指定地址不参与地域判定。
+
+### 3.10 `threatintel`（PhasePre / PhaseRequest）
+
+本地威胁情报匹配，不访问云端服务。支持 IP / CIDR、ASN、精确域名与
+`*.example.com` 通配后缀；ASN 需要额外的 `GeoLite2-ASN.mmdb`。
+
+| 键 | 类型 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `files` | []string | `[]` | 显式情报文件列表 |
+| `dirs` | []string | `[]` | 递归扫描目录（`.txt` / `.list` / `.csv` / `.yaml` / `.yml` / `.json`） |
+| `asn_database` | string | `-` | ASN 条目存在时必填 |
+| `action` | enum | `block` | `block` / `observe` |
+| `score` | int | `0` | 命中时累加的异常评分 |
+| `rule_id` | string | `threat_intel_match` | 命中明细规则标识 |
+| `max_total_bytes` | int | 单文件上限 × 16 | 情报文件总量上限 |
+| `hot_reload` | bool | `true` | 是否轮询文件变化 |
+| `refresh_interval` | duration | `5m` | 文件扫描间隔 |
+
+文件格式：
+
+```text
+# txt / list：一行一条，支持 type value、type:value 或自动识别
+1.2.3.0/24
+AS13335
+evil.example.com
+*.bad.example
+```
+
+```csv
+type,value
+ip,9.9.9.9
+asn,64512
+domain,phish.example
+```
+
+```yaml
+- type: ip
+  value: 203.0.113.0/24
+- type: domain
+  value: "*.malware.example"
+```
+
+匹配顺序：先客户端 IP/CIDR，再 ASN，最后 Host / Referer / Origin 域名。
+
+### 3.11 `apisec`（PhaseBody）
+
+基于本地 OpenAPI 3.x 文件校验请求契约。支持 path / query / header / cookie 参数，
+以及 `application/json`（含 `+json`）请求体；JSON Schema 覆盖
+`type` / `required` / `properties` / `additionalProperties` / `items` /
+`enum` / `pattern` / 长度与数值范围 / `allOf` / `anyOf` / `oneOf` / `nullable`，
+并支持 `#/components/schemas/...` 本地 `$ref`。
+
+| 键 | 类型 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `spec_file` | string | 必填 | 本地 OpenAPI 3.x YAML / JSON |
+| `action` | enum | `block` | 违规时的动作：`block` / `observe` |
+| `score` | int | `0` | 命中违规时累加的异常评分 |
+| `rule_id` | string | `apisec_contract_violation` | 命中明细规则标识 |
+| `unknown_action` | enum | `off` | spec 未声明接口的动作：`off` / `block` / `observe` |
+| `check_parameters` | bool | `true` | 是否校验参数 |
+| `check_body` | bool | `true` | 是否校验 JSON 请求体；启用时实例必须是 `phase: body` |
+| `max_violations` | int | `8` | 单次请求最多上报的违规数 |
+| `max_body_bytes` | int | `limits.max_scan_token_bytes` | 参与契约校验的请求体上限 |
+| `hot_reload` | bool | `true` | 是否轮询 spec 文件变化 |
+| `poll_interval` | duration | `5s` | spec 文件扫描间隔 |
+
+行为约定：
+
+- 同时匹配多个模板路径时，字面段更多的路径优先（`/users/me` 优先于 `/users/{id}`）；
+- 参数按 schema 类型转换后再校验；数组参数支持重复键与逗号分隔；
+- 请求体只在 `check_body=true` 且运行期确实缓冲了请求体时校验；
+- 当前版本只做结构校验，不执行 `format`（email / uuid 等）语义校验；
+- 未在 spec 中出现的接口默认放行，避免增量接入时误伤存量接口。
+
+### 3.12 `challenge`（PhaseRequest）
+
+不依赖外部服务的本地身份校验，适合后台、管理面与需要额外口令保护的站点。
+
+| 键 | 类型 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `mode` | enum | `basic` | `basic` / `cookie` / `basic_or_cookie` |
+| `realm` | string | `waf` | Basic 认证提示域 |
+| `users` | []object | 必填 | 本地账号列表 |
+| `users[].username` | string | 必填 | 用户名，列表内唯一 |
+| `users[].password` | string | 二选一 | 明文口令 |
+| `users[].password_sha256` | string | 二选一 | 口令的 SHA-256 十六进制摘要（优先） |
+| `cookie_name` | string | `waf_auth` | 签名 Cookie 名 |
+| `cookie_path` | string | `/` | Cookie 作用路径 |
+| `cookie_secure` | bool | `true` | 是否添加 `Secure` |
+| `secret` | string | Cookie 模式必填 | HMAC 密钥，至少 16 字节 |
+| `secret_file` | string | 二选一 | 从文件读取密钥（自动去首尾空白） |
+| `ttl` | duration | `1h` | 签名 Cookie 有效期 |
+| `rule_id` | string | `challenge_required` | 未认证命中的规则标识 |
+
+认证流程：
+
+1. `basic`：校验 `Authorization: Basic`，失败返回 401 + `WWW-Authenticate`；
+2. `cookie`：校验 HMAC-SHA256 签名 Cookie；同时接受 Basic 凭据并下发 Cookie，
+   便于首次认证与后续免密；
+3. `basic_or_cookie`：两者任一通过即可。
+
+Cookie 是无状态令牌，不在 WAF 内存中维护会话表，因此适合多实例部署。
+`Set-Cookie` 能否透传取决于代理：Traefik 需把该头加入 `authResponseHeaders`；
+Nginx `auth_request` 默认不透传鉴权子请求的 `Set-Cookie`，此时请使用 `basic` 模式，
+或由 OpenResty / Traefik 显式转发该响应头。
 
 ---
 
@@ -964,7 +1444,14 @@ pipeline:
 | 启动报「站点 ... 重复 / 无 hosts」 | 见 §2.5 约束清单 |
 | `check-config` 报未知字段 | 拿 §2 的表逐项比对；严格模式会指出完整路径 |
 | 配置改了但不生效 | `waf check-config` 看「配置项来源摘要」，确认是不是被 CLI / 环境变量覆盖 |
-| 站点 `engine_mode` 配了不生效 | **已知限制**：该字段当前只做校验与解析，运行期未消费（见 §2.5）。按站点灰度请用「单独实例 + 代理按 Host 分流」；全局灰度用 `engine.mode: detection_only` 配合 `pipeline[type=threshold].settings.action: observe` |
+| `-c 目录` 改了配置但没生效 | 确认目录内文件扩展名是 `.yaml/.yml/.json`、文件名不是隐藏/备份文件；启动日志应出现「配置目录监听已启用」 |
+| 热重载日志报 `restart_required=...` | 修改了必须重启的配置段；按日志列出的段重启进程，或只保留可热加载段（见 §1.5） |
+| 空配置目录启动失败 | 目录必须至少包含一个可加载配置文件；如需纯默认值运行，不要传该目录 |
+| 站点 `engine_mode` 配了不生效 | 确认 `Host` 是否命中该站点；覆盖由 phase 1 的 `ctl:ruleEngine` 实现，`inherit` 不会生成覆盖规则。全局灰度仍可用 `engine.mode: detection_only` |
+| `apisec` 启动报「必须使用 phase: body」 | 关闭 `check_body`，或把实例改为 `phase: body`；只有 body 阶段才会缓冲请求体 |
+| GeoIP 启动报数据库不可访问 | `geoip.database` 必须是本地 `GeoLite2-Country.mmdb` / `GeoLite2-City.mmdb` 文件；同时检查 `limits.max_mmdb_bytes` |
+| 威胁情报启动报 ASN 缺少数据库 | 情报文件中存在 ASN 条目时必须配置 `threatintel.asn_database`（GeoLite2-ASN MMDB） |
+| 挑战 Cookie 不生效 | Nginx 原生 `auth_request` 默认不透传鉴权子请求的 `Set-Cookie`；改用 `mode: basic`，或由 Traefik / OpenResty 显式转发 |
 | 放行请求在访问日志里查不到 | `logging.access.allow_level` 被改成了 `debug` / `off`（默认 `info` 表示放行与拦截都留痕，见 §2.10） |
 | JSON 请求体检测不生效 | 检查 `engine.body.processors` 是否覆盖了该 `Content-Type` |
 | 请求体没读 | 检查 `ingress.body.lazy` 与链中是否存在 `phase: body` 单元 |
@@ -974,7 +1461,7 @@ pipeline:
 | 启动报「编码不受支持」 | `encodings` 只接受 `gzip` / `deflate`（`br` 需要第三方依赖，本项目不支持） |
 | 例外明明配了却不生效 | 检查 `enabled`（**默认 false**）；再看作用范围：全局例外必须由程序放在规则文件之后、作用域例外放在之前（自动保证，勿手工写进 `inline_directives`） |
 | 例外里的 `url_pattern` 匹配不上 | 该正则对 `REQUEST_URI` 求值且**含查询串**，也不做自动锚定；精确匹配请自己写 `^...$` |
-| 改规则文件后没生效 | 看 `engine.hot_reload`：`enabled` 是否为 `true`、`poll_interval` 是否已到；也可 `waf rules reload` 立即触发 |
+| 改 CRS / 蜜罐规则文件后没生效 | 看 `engine.hot_reload`：`enabled` 是否为 `true`、`poll_interval` 是否已到；蜜罐还需配置 `settings.rules_dir`；也可 `waf rules reload` 立即触发 |
 | `waf rules reload` 报缺少 marker_file | 在配置里设置 `engine.hot_reload.marker_file` 后重试 |
 | `waf rules verify` 退出码是 3 | 文件齐全，但目录里有 `manifest.yaml` 未声明的文件（升级残留）；确认后清理，不要直接投入使用 |
 | 告警一条都发不出 | ① `notify.enabled` 是否为 `true`；② `notifiers[]` 里是否有 `enabled: true` 的通道（声明的通道一个都没启用会在校验阶段直接报错）；③ 启动日志「告警外送已装配」的 `channels` 是否为空；④ `notifiers[].min_level` / `notify.min_level` 是否把该级别过滤掉了 |

@@ -13,7 +13,7 @@
 
 | 步骤 | 命令 / 动作 | 期望结果 |
 | --- | --- | --- |
-| 1 | `waf check-config -c /etc/waf/waf.yaml` | 退出码 0；输出末尾能看到「生效配置」，且未注册的 `type` 会在这一步暴露 |
+| 1 | `waf check-config -c /etc/waf/waf.yaml`（也支持 `-c /etc/waf/conf.d` 目录） | 退出码 0；输出末尾能看到「生效配置」，且未注册的 `type` 会在这一步暴露 |
 | 2 | 用 `configs/ftw/*.yaml` 在测试环境跑一遍（`go test ./test/ftw/ -v`） | 10 个阶段全绿 |
 | 3 | 以 `engine.mode: detection_only` 灰度上线 | 只记录 `would_block`，不真正拦截 |
 | 4 | `waf report detection --since 24h`，连续观察 3–7 天 | 「若拦截」比例稳定且样例复核无大规模误报 |
@@ -22,6 +22,9 @@
 > **不要跳过第 3 步**。CRS 的误报率与业务形态强相关，
 > 直接以 `on` 上线最常见的结果是「上线当天拦了正常用户」，
 > 而 detection_only 的成本只是多等几天。
+
+> 使用目录配置时，运行中的实例会自动监听目录变化并热加载 `pipeline` / `sites` / `ban` / `responder` / `engine`；
+> 修改监听地址、接入方式、存储、日志或指标等段仍需重启。完整清单见 `docs/configuration.md` §1.5。
 
 ---
 
@@ -164,12 +167,27 @@ waf rules list -c /etc/waf/waf.yaml
   示例：`ban_keys: [client_ip, client_ip+path]` 表示「整段 IP 封禁」与「只封该 IP 对该路径」同时生效。
   维度越多，每个请求的名单查询次数越多（按声明顺序短路），因此只启用真正需要的维度。
   `waf ban list` 的表头会打印生效的查询维度，启动日志也会输出 `ban_keys`。
+
+封禁 / 拒绝发生时，访问日志与 SQLite 审计记录会同时给出：
+
+- `target`：触发判定的检测目标（例如 `ARGS:id`、`REQUEST_URI`、`client_ip+path`）；
+- `ban_scope`：本次拦截命中的封禁维度；
+- `uri` / `query` / `params`：完整 URI、查询串与脱敏后的 JSON / form 参数快照；
+- `rule_id` / `check`：触发规则与校验单元实例名。
+
+响应侧对应响应头为 `X-WAF-Target` 与 `X-WAF-Ban-Scope`。Nginx 原生通道需同时配置
+`auth_request_set` 与 `proxy_set_header`；OpenResty 脚本会透传这两个响应头。Traefik
+`errors` 中间件无法读取鉴权响应头，因此普通拦截的最终 `/waf/deny` 响应只能尽力从
+查询参数或请求头还原目标与维度。
 - **时长**：`ban.default_ttl` 默认 `30m`，`ban.max_ttl` 默认 `24h`。
   默认值是「足够劝退扫描器/爆破脚本」与「避免办公网 NAT 出口被整体误封」之间的平衡点。
   累进封禁（`ban.escalate` + `ban.escalate_steps`）默认关闭，
   在「同一来源反复命中」的场景下才建议开启。
 - **封禁状态多实例共享**：由 `stores[].type: redis` 承载；
   Redis 未启用时回落到本地存储（此时各实例的封禁视图不共享，属于已知降级）。
+- **启用 `database.enabled` 时，封禁记录改由 SQLite 持久化**：`waf ban` 与服务进程读写同一个
+  `database.path`，重启后仍然保留；限速计数仍走 `stores[]`。SQLite 适用于单机 / 旁路由部署，
+  不要把同一个数据库文件放在 NFS 等网络文件系统上供多个实例并发写入。
 - **本地存储的两种后端行为不同**，选型前必须区分：
 
   | 存储后端 | 封禁是否持久化 | 是否支持「CLI 封禁 → 运行中进程立即生效」 |
@@ -185,9 +203,11 @@ waf rules list -c /etc/waf/waf.yaml
 ### 4.2 日常命令
 
 ```bash
+waf db status   -c /etc/waf/waf.yaml                  # 初始化状态、策略版本、封禁与审计数据量
 waf ban list    -c /etc/waf/waf.yaml                  # 当前封禁清单（含全部维度）与剩余时长
 waf ban add     -c /etc/waf/waf.yaml --ip 203.0.113.10 --ttl 2h --reason "手工封禁：爆破"
 waf ban remove  -c /etc/waf/waf.yaml --ip 203.0.113.10
+waf db import-config -c /etc/waf/waf.yaml --force     # 重新导入 YAML 运营数据（保留封禁与审计）
 ```
 
 注意两点（都是「按维度封禁」带来的新语义）：

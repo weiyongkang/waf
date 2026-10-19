@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -32,6 +33,13 @@ func (c *fakeClock) Now() time.Time {
 
 // Since 返回自 t 起经过的时长。
 func (c *fakeClock) Since(t time.Time) time.Duration { return c.Now().Sub(t) }
+
+// Advance 推进时钟。
+func (c *fakeClock) Advance(delta time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(delta)
+}
 
 // testResolver 是只承载测试存储实例的解析器。
 type testResolver struct {
@@ -68,6 +76,13 @@ func (r *testResolver) Names() []string {
 // newTestManager 构造注入本地内存存储的封禁管理器。
 func newTestManager(t *testing.T, cfg config.BanConfig) (*Manager, core.Store) {
 	t.Helper()
+	manager, memoryStore, _ := newTestManagerWithClock(t, cfg)
+	return manager, memoryStore
+}
+
+// newTestManagerWithClock 构造封禁管理器并返回可手动推进的时钟。
+func newTestManagerWithClock(t *testing.T, cfg config.BanConfig) (*Manager, core.Store, *fakeClock) {
+	t.Helper()
 
 	clock := &fakeClock{now: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
 	memoryStore, err := store.NewMemoryStore(store.MemoryOptions{
@@ -90,7 +105,7 @@ func newTestManager(t *testing.T, cfg config.BanConfig) (*Manager, core.Store) {
 	if err != nil {
 		t.Fatalf("构造封禁管理器失败：%v", err)
 	}
-	return manager, memoryStore
+	return manager, memoryStore, clock
 }
 
 // defaultBanConfig 返回测试基线配置。
@@ -110,6 +125,93 @@ func newRequestContext(clientIP string) *core.RequestContext {
 	rctx.Raw.ClientIP = clientIP
 	rctx.Site = &core.Site{Name: core.DefaultSiteName}
 	return rctx
+}
+
+// detailRecordingStore 记录 BanDetail，用于验证管理器传递完整请求上下文。
+type detailRecordingStore struct {
+	core.Store
+	mu     sync.Mutex
+	detail core.BanDetail
+	called bool
+}
+
+func (s *detailRecordingStore) BanWithDetail(_ context.Context, _ string, _ time.Duration,
+	_ string, detail core.BanDetail) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.detail = detail
+	s.called = true
+	return nil
+}
+
+func (s *detailRecordingStore) BanIfAbsentWithDetail(_ context.Context, _ string, _ time.Duration,
+	_ string, detail core.BanDetail) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.detail = detail
+	s.called = true
+	return true, nil
+}
+
+// TestManagerPassesBanDetail 覆盖：自动封禁写入存储时携带规则、目标、URI 与脱敏参数。
+func TestManagerPassesBanDetail(t *testing.T) {
+	clock := &fakeClock{now: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
+	memoryStore, err := store.NewMemoryStore(store.MemoryOptions{
+		Name:            "default",
+		Prefix:          "test:",
+		Clock:           clock,
+		Metrics:         core.NoopMetrics{},
+		CleanupInterval: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("构造内存存储失败：%v", err)
+	}
+	t.Cleanup(func() { _ = memoryStore.Close() })
+
+	recording := &detailRecordingStore{Store: memoryStore}
+	manager, err := New(Options{
+		Config:  defaultBanConfig(),
+		Stores:  &testResolver{stores: map[string]core.Store{"default": recording}},
+		Metrics: core.NoopMetrics{},
+	})
+	if err != nil {
+		t.Fatalf("构造封禁管理器失败：%v", err)
+	}
+
+	rctx := newRequestContext("203.0.113.30")
+	rctx.Raw.URI = "/login?username=alice&password=secret"
+	rctx.Raw.Path = "/login"
+	rctx.Raw.RawQuery = "username=alice&password=secret"
+	err = manager.Ban(context.Background(), rctx, []core.BanRequest{{
+		Key:    "ip:203.0.113.30",
+		Scope:  config.BanKeyClientIP,
+		RuleID: "internal_banlist",
+		Check:  "banlist",
+		Target: "client_ip",
+		Reason: "测试封禁",
+	}})
+	if err != nil {
+		t.Fatalf("落地封禁失败：%v", err)
+	}
+
+	recording.mu.Lock()
+	defer recording.mu.Unlock()
+	if !recording.called {
+		t.Fatal("存储未收到结构化封禁详情")
+	}
+	if recording.detail.RuleID != "internal_banlist" || recording.detail.Check != "banlist" {
+		t.Fatalf("规则上下文不符：%+v", recording.detail)
+	}
+	if recording.detail.Target != "client_ip" || recording.detail.Scope != config.BanKeyClientIP {
+		t.Fatalf("目标 / 维度不符：%+v", recording.detail)
+	}
+	if recording.detail.URI != rctx.Raw.URI || recording.detail.Query != rctx.Raw.RawQuery {
+		t.Fatalf("URI / 查询串不符：%+v", recording.detail)
+	}
+	if !strings.Contains(recording.detail.ParamsJSON, "[REDACTED]") ||
+		strings.Contains(recording.detail.ParamsJSON, "secret") {
+		t.Fatalf("参数快照未正确脱敏：%s", recording.detail.ParamsJSON)
+	}
 }
 
 // TestKeyForClientIP 覆盖：两种封禁键维度的键构造。
@@ -200,6 +302,10 @@ func TestBanAppliesDefaultTTL(t *testing.T) {
 func TestBanEscalation(t *testing.T) {
 	cfg := defaultBanConfig()
 	cfg.Escalate = true
+	// 累进封禁的阶梯体现在「重新封禁时的 TTL」上；默认不续期时第二次封禁
+	// 会保持首次到期时间（见 TestBanRepeatKeepsOriginalExpiry），因此这里显式
+	// 打开续期，以覆盖累进阶梯本身的语义。
+	cfg.RenewOnRepeat = true
 	cfg.EscalateSteps = []core.Duration{
 		core.Duration(30 * time.Minute),
 		core.Duration(2 * time.Hour),
@@ -224,6 +330,83 @@ func TestBanEscalation(t *testing.T) {
 		if remaining != expected {
 			t.Fatalf("第 %d 次封禁时长期望 %s，实际 %s", index+1, expected, remaining)
 		}
+	}
+}
+
+// TestBanRepeatKeepsOriginalExpiry 覆盖：重复命中不刷新首次封禁的到期时间。
+func TestBanRepeatKeepsOriginalExpiry(t *testing.T) {
+	manager, memoryStore, clock := newTestManagerWithClock(t, defaultBanConfig())
+	ctx := context.Background()
+	rctx := newRequestContext("1.2.3.4")
+
+	if err := manager.Ban(ctx, rctx, []core.BanRequest{{RuleID: "test"}}); err != nil {
+		t.Fatalf("首次封禁失败：%v", err)
+	}
+	firstEntries, err := memoryStore.List(ctx)
+	if err != nil || len(firstEntries) != 1 {
+		t.Fatalf("首次封禁后名单不符：entries=%+v err=%v", firstEntries, err)
+	}
+	originalExpireAt := firstEntries[0].ExpireAt
+	originalBannedAt := firstEntries[0].BannedAt
+
+	// 攻击者在封禁有效期内继续请求：不能续期，否则持续攻击会让封禁永不解除。
+	clock.Advance(10 * time.Minute)
+	if err := manager.Ban(ctx, rctx, []core.BanRequest{{RuleID: "test"}}); err != nil {
+		t.Fatalf("重复封禁失败：%v", err)
+	}
+
+	banned, remaining, err := memoryStore.IsBanned(ctx, "ip:1.2.3.4")
+	if err != nil || !banned {
+		t.Fatalf("重复封禁后仍应处于封禁状态，实际 banned=%v err=%v", banned, err)
+	}
+	if remaining != 20*time.Minute {
+		t.Fatalf("重复封禁不应刷新 TTL，剩余时长期望 20m，实际 %s", remaining)
+	}
+	entries, err := memoryStore.List(ctx)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("重复封禁后名单不应新增记录：entries=%+v err=%v", entries, err)
+	}
+	if !entries[0].ExpireAt.Equal(originalExpireAt) || !entries[0].BannedAt.Equal(originalBannedAt) {
+		t.Fatalf("重复封禁改写了首次封禁时间：before=(%s,%s) after=(%s,%s)",
+			originalBannedAt, originalExpireAt, entries[0].BannedAt, entries[0].ExpireAt)
+	}
+
+	// 到期后再次封禁：这是一次全新的封禁，应从当前时刻重新计算完整 TTL。
+	clock.Advance(21 * time.Minute)
+	if banned, _, _ := memoryStore.IsBanned(ctx, "ip:1.2.3.4"); banned {
+		t.Fatal("到期后应自动解除封禁")
+	}
+	if err := manager.Ban(ctx, rctx, []core.BanRequest{{RuleID: "test"}}); err != nil {
+		t.Fatalf("到期后重新封禁失败：%v", err)
+	}
+	_, remaining, _ = memoryStore.IsBanned(ctx, "ip:1.2.3.4")
+	if remaining != 30*time.Minute {
+		t.Fatalf("到期后重新封禁应获得完整 TTL，实际 %s", remaining)
+	}
+}
+
+// TestBanRenewOnRepeat 覆盖：显式开启 renew_on_repeat 时恢复旧的续期行为。
+func TestBanRenewOnRepeat(t *testing.T) {
+	cfg := defaultBanConfig()
+	cfg.RenewOnRepeat = true
+	manager, memoryStore, clock := newTestManagerWithClock(t, cfg)
+	ctx := context.Background()
+	rctx := newRequestContext("1.2.3.4")
+
+	if err := manager.Ban(ctx, rctx, []core.BanRequest{{RuleID: "test"}}); err != nil {
+		t.Fatalf("首次封禁失败：%v", err)
+	}
+	clock.Advance(10 * time.Minute)
+	if err := manager.Ban(ctx, rctx, []core.BanRequest{{RuleID: "test"}}); err != nil {
+		t.Fatalf("重复封禁失败：%v", err)
+	}
+
+	_, remaining, err := memoryStore.IsBanned(ctx, "ip:1.2.3.4")
+	if err != nil {
+		t.Fatalf("查询失败：%v", err)
+	}
+	if remaining != 30*time.Minute {
+		t.Fatalf("开启续期后剩余时长应重置为 30m，实际 %s", remaining)
 	}
 }
 

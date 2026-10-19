@@ -80,6 +80,7 @@ func TestVerdictSemantics(t *testing.T) {
 		VerdictObserve:     false,
 		VerdictBlock:       true,
 		VerdictRateLimited: true,
+		VerdictHoneypot:    true,
 	}
 	for verdict, want := range shortCircuit {
 		if got := verdict.IsShortCircuit(); got != want {
@@ -93,6 +94,9 @@ func TestVerdictSemantics(t *testing.T) {
 	}
 	if !VerdictBlock.IsBlocking() {
 		t.Error("VerdictBlock 应被视为拒绝类结论")
+	}
+	if VerdictHoneypot.IsBlocking() {
+		t.Error("VerdictHoneypot 应短路但不计入拒绝类指标")
 	}
 }
 
@@ -141,5 +145,17 @@ func TestSiteMatches(t *testing.T) {
 		if got := site.Matches(host); got != want {
 			t.Errorf("Site.Matches(%q) = %v，期望 %v", host, got, want)
 		}
+	}
+}
+
+// TestResultIsEmptyConsidersHeaders 验证「仅携带响应头」的结论不会被当成空结果，
+// 否则挑战成功后的 Set-Cookie 可能被执行器丢弃。
+func TestResultIsEmptyConsidersHeaders(t *testing.T) {
+	result := &Result{Headers: map[string]string{"Set-Cookie": "waf_auth=token"}}
+	if result.IsEmpty() {
+		t.Fatal("携带响应头的结论不应被视为空结果")
+	}
+	if !(&Result{}).IsEmpty() {
+		t.Fatal("完全空的结论应被视为空结果")
 	}
 }

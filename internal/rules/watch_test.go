@@ -157,6 +157,62 @@ func TestFingerprintIgnoresUnmatchedFiles(t *testing.T) {
 	}
 }
 
+// TestFingerprintRecursiveDetectsNestedChanges 覆盖：递归模式能发现子目录中的规则变更。
+func TestFingerprintRecursiveDetectsNestedChanges(t *testing.T) {
+	dir := t.TempDir()
+	nested := filepath.Join(dir, "nested", "deeper")
+	if err := os.MkdirAll(nested, 0o700); err != nil {
+		t.Fatalf("创建子目录失败：%v", err)
+	}
+	path := writeRuleFile(t, nested, "a.yaml", "- path: /old\n")
+
+	before, err := FingerprintRecursive([]string{dir}, []string{"*.yaml"}, nil)
+	if err != nil {
+		t.Fatalf("计算递归指纹失败：%v", err)
+	}
+
+	if err := os.WriteFile(path, []byte("- path: /new-rule\n"), 0o600); err != nil {
+		t.Fatalf("改写子目录规则失败：%v", err)
+	}
+	later := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(path, later, later); err != nil {
+		t.Fatalf("调整文件时间失败：%v", err)
+	}
+
+	after, err := FingerprintRecursive([]string{dir}, []string{"*.yaml"}, nil)
+	if err != nil {
+		t.Fatalf("计算递归指纹失败：%v", err)
+	}
+	if before == after {
+		t.Fatalf("子目录规则变化后递归指纹应发生变化")
+	}
+}
+
+// TestFingerprintNonRecursiveIgnoresNestedFiles 覆盖：默认模式保持原有语义，
+// 不会因为子目录文件变化而触发无关重载。
+func TestFingerprintNonRecursiveIgnoresNestedFiles(t *testing.T) {
+	dir := t.TempDir()
+	writeRuleFile(t, dir, "top.conf", "top")
+	before, err := Fingerprint([]string{dir}, []string{"*.conf"}, nil)
+	if err != nil {
+		t.Fatalf("计算指纹失败：%v", err)
+	}
+
+	nested := filepath.Join(dir, "nested")
+	if err := os.MkdirAll(nested, 0o700); err != nil {
+		t.Fatalf("创建子目录失败：%v", err)
+	}
+	writeRuleFile(t, nested, "nested.conf", "nested")
+
+	after, err := Fingerprint([]string{dir}, []string{"*.conf"}, nil)
+	if err != nil {
+		t.Fatalf("计算指纹失败：%v", err)
+	}
+	if before != after {
+		t.Fatalf("非递归模式不应感知子目录文件变化")
+	}
+}
+
 // TestFingerprintRejectsInvalidPattern 覆盖：非法匹配模式必须报错而不是静默忽略。
 func TestFingerprintRejectsInvalidPattern(t *testing.T) {
 	dir := t.TempDir()

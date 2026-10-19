@@ -71,7 +71,11 @@ func (c *banCache) has(key string) bool {
 }
 
 // set 记录一个「已封禁」结论。
-func (c *banCache) set(key string) {
+//
+// remaining 是 Redis 中封禁的剩余 TTL：缓存有效期不得超过它，
+// 否则封禁到期后本实例仍会继续拦截最多 local_cache_ttl。
+// remaining <= 0 表示「永不过期或未知」，此时使用配置的缓存时长。
+func (c *banCache) set(key string, remaining time.Duration) {
 	if c == nil {
 		return
 	}
@@ -82,7 +86,11 @@ func (c *banCache) set(key string) {
 	if len(c.entries) >= c.maxEntries {
 		c.purgeExpiredLocked()
 	}
-	c.entries[key] = c.clock.Now().Add(c.ttl)
+	ttl := c.ttl
+	if remaining > 0 && remaining < ttl {
+		ttl = remaining
+	}
+	c.entries[key] = c.clock.Now().Add(ttl)
 }
 
 // remove 移除一条缓存（解封后必须调用，否则本实例会继续拦截已解封来源）。

@@ -158,6 +158,26 @@ func (p *Pipeline) Entries() []string {
 	return names
 }
 
+// MatchHoneypot 按校验链顺序重新匹配蜜罐规则，供 /waf/deny 渲染端点使用。
+//
+// 只调用实现了 core.HoneypotMatcher 的校验单元，不执行其它检查，
+// 因此不会重复触发限速计数、封禁写入或告警外送。
+func (p *Pipeline) MatchHoneypot(rctx *core.RequestContext) *core.Result {
+	if rctx == nil {
+		return nil
+	}
+	for _, item := range p.entries {
+		matcher, ok := item.check.(core.HoneypotMatcher)
+		if !ok {
+			continue
+		}
+		if result := matcher.MatchHoneypot(rctx); result != nil {
+			return result
+		}
+	}
+	return nil
+}
+
 // Decide 执行整条校验链并返回最终结论（core.Decider 实现）。
 //
 // 返回的 Result 永不为 nil：链为空或全部单元均无结论时返回放行（allow）结论。
@@ -453,6 +473,19 @@ func mergeResult(rctx *core.RequestContext, merged, src *core.Result) {
 	}
 	if len(src.Alerts) > 0 {
 		merged.Alerts = append(merged.Alerts, src.Alerts...)
+	}
+	if len(src.Headers) > 0 {
+		if merged.Headers == nil {
+			merged.Headers = make(map[string]string, len(src.Headers))
+		}
+		for name, value := range src.Headers {
+			merged.Headers[name] = value
+		}
+	}
+	// 直接响应覆盖跟随终态结论一起合并：蜜罐命中后 responder 必须拿到
+	// 规则自己的状态码 / 响应头 / 响应体，而不是全局 JSON 模板。
+	if src.Response != nil && merged.Response == nil {
+		merged.Response = src.Response
 	}
 
 	// 保留首个运行期错误：访问日志据此把「失败开放 / 失败关闭」的请求与正常请求区分开，

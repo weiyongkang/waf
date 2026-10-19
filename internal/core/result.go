@@ -23,6 +23,26 @@ type BanRequest struct {
 	Reason string
 	// RuleID 是触发封禁的规则标识。
 	RuleID string
+	// Check 是触发封禁的校验单元实例名。
+	Check string
+	// Target 是触发封禁的检测目标或封禁维度。
+	Target string
+}
+
+// ResponseOverride 是校验单元对最终 HTTP 响应的直接覆盖。
+//
+// 使用场景：蜜罐命中后必须原样返回规则中定义的伪造页面，
+// 不能再被 responder 的全局 JSON 模板改写。其它校验单元不应设置该字段，
+// 否则会绕过统一的错误码与错误体契约。
+type ResponseOverride struct {
+	// Status 是最终 HTTP 状态码。
+	Status int
+	// ContentType 是最终 Content-Type；为空时按纯文本处理。
+	ContentType string
+	// Headers 是最终响应头；Content-Type 由 ContentType 字段统一设置。
+	Headers map[string]string
+	// Body 是最终响应体原文，不做模板渲染。
+	Body string
 }
 
 // Result 是校验单元的输出结论。
@@ -38,6 +58,12 @@ type Result struct {
 	Message string
 	// RetryAfter 用于限速场景，非零时写入 Retry-After 响应头。
 	RetryAfter time.Duration
+	// Headers 是校验单元要求的附加响应头（例如 WWW-Authenticate、Set-Cookie）。
+	//
+	// 与 Response 的区别：Headers 不改变响应体，只补充响应头；放行结论同样会
+	// 透传这些头（用于本地挑战成功后的签名 Cookie 下发）。X-WAF-* 审计头仍由
+	// responder / server 统一覆盖，插件不得借此伪造审计语义。
+	Headers map[string]string
 	// Score 是本次结论累加的异常评分增量。
 	Score int
 	// Findings 是本次结论收集到的命中明细。
@@ -56,6 +82,10 @@ type Result struct {
 	Alerts []Alert
 	// Check 是产生该结论的校验单元实例名，用于日志与指标定位。
 	Check string
+	// Response 非空时直接覆盖对外响应（状态码、响应头、响应体）。
+	//
+	// 当前仅蜜罐使用该字段；为空时仍按 responder 的统一 JSON 错误体渲染。
+	Response *ResponseOverride
 	// Err 是校验单元自身运行期的错误（例如共享存储不可用）。
 	// 该字段非空时，pipeline 会按该实例的 on_error 策略处理。
 	Err error
@@ -97,8 +127,15 @@ func (r *Result) IsEmpty() bool {
 		return true
 	}
 	return r.Verdict == VerdictContinue && r.Score == 0 &&
-		len(r.Findings) == 0 && len(r.Bans) == 0 && len(r.Alerts) == 0 && r.Err == nil &&
-		!r.WouldBlock
+		len(r.Findings) == 0 && len(r.Bans) == 0 && len(r.Alerts) == 0 && len(r.Headers) == 0 &&
+		r.Err == nil &&
+		!r.WouldBlock && r.Response == nil
+}
+
+// WithResponse 设置直接响应覆盖并返回自身，便于链式构造。
+func (r *Result) WithResponse(response ResponseOverride) *Result {
+	r.Response = &response
+	return r
 }
 
 // MarkWouldBlock 把结论标记为「旁路观察模式下本应拦截」。

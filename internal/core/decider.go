@@ -24,6 +24,29 @@ type Decider interface {
 	Name() string
 }
 
+// SiteBodyDecider 是可选接口：站点级校验链可能在某个站点需要读体、另一个站点不需要。
+//
+// 未实现该接口时，HTTP 层回退到 Decider.NeedsBody 的全局判断，保持兼容。
+type SiteBodyDecider interface {
+	// NeedsBodyFor 报告命中站点的校验链是否需要读取请求体。
+	NeedsBodyFor(rctx *RequestContext) bool
+}
+
+// HoneypotMatcher 是可选接口：由校验链实现，供 /waf/deny 渲染端点
+// 在不重复执行整条校验链的前提下，按原始请求重新匹配蜜罐规则。
+//
+// 之所以放在 core 而不是让 server 直接依赖 honeypot 包：
+//   - server 只依赖抽象，不关心规则加载与匹配细节；
+//   - 其它入口（例如后续的管理面预览）可以复用同一匹配能力；
+//   - 未装配蜜罐时，类型断言失败即可安全降级为普通 JSON 错误体。
+type HoneypotMatcher interface {
+	// MatchHoneypot 返回首条命中的蜜罐规则响应；未命中返回 nil。
+	//
+	// 实现不得产生告警、评分或封禁等副作用：命中事件已在 /waf/auth 阶段记录，
+	// 渲染阶段只负责重新生成响应，避免同一次请求被重复计数。
+	MatchHoneypot(rctx *RequestContext) *Result
+}
+
 // AllowAllDecider 是「纯放行」执行器，用于空校验链、冒烟测试与健康检查。
 type AllowAllDecider struct{}
 

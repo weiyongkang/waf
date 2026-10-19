@@ -30,6 +30,12 @@ type Config struct {
 	Sites []SiteConfig `yaml:"sites"`
 	// Pipeline 是校验链，有序数组即串联顺序；enabled 控制单个实例的启停。
 	Pipeline []core.InstanceConfig `yaml:"pipeline"`
+	// Pipelines 是具名校验链集合，供 sites[].pipeline 引用实现站点级差异化。
+	//
+	// 设计取舍：保留顶层 pipeline 作为默认链，避免破坏既有配置；需要按站点
+	// 使用不同规则集、插件组合或限速策略时，在该数组中声明具名链。
+	// 数组中的 name 必须唯一，且不能使用保留名 default。
+	Pipelines []PipelineConfig `yaml:"pipelines"`
 	// Stores 是共享状态存储列表（限速计数 + 内部封禁名单）。
 	Stores []StoreConfig `yaml:"stores"`
 	// Ban 是封禁策略（仅 WAF 内部生效，不执行任何系统防火墙操作）。
@@ -46,6 +52,12 @@ type Config struct {
 	Limits LimitsConfig `yaml:"limits"`
 	// Cache 是本地缓存配置。
 	Cache CacheConfig `yaml:"cache"`
+	// Database 是运行期 SQLite 持久化配置。
+	//
+	// 只有明确的运营数据（封禁、IP 名单、站点策略、关键标量策略）会写入数据库；
+	// 监听地址、存储连接、规则目录、模板路径、密钥等部署配置始终以配置文件为准。
+	// 默认关闭，避免不关心持久化的部署被隐式创建数据库文件。
+	Database DatabaseConfig `yaml:"database"`
 }
 
 // ServerConfig 是 HTTP 服务配置。
@@ -54,6 +66,11 @@ type ServerConfig struct {
 	Listen string `yaml:"listen"`
 	// MetricsListen 是 /metrics 与 /healthz 的独立监听地址，便于网络隔离。
 	MetricsListen string `yaml:"metrics_listen"`
+	// BasePath 是所有 WAF HTTP 端点的统一前缀（例如 "/gateway"）；为空表示不加前缀。
+	//
+	// 拼接规则由 config.JoinBasePath 统一实现：前缀与端点路径做幂等拼接，
+	// 已包含该前缀的路径不会被重复拼接，从而兼容旧配置中的 "/waf/auth"。
+	BasePath string `yaml:"base_path"`
 	// ReadHeaderTimeout 是读取请求头的超时，防止慢速攻击占用连接。
 	ReadHeaderTimeout core.Duration `yaml:"read_header_timeout"`
 	// ShutdownTimeout 是优雅关停的最长等待时间。
@@ -179,6 +196,15 @@ type ResponderConfig struct {
 	IncludeDetails bool `yaml:"include_details"`
 	// Messages 是错误码到中文提示语的自定义映射，便于按业务口径调整文案。
 	Messages map[string]string `yaml:"messages"`
+	// Template 是内联 JSON 响应模板（Go text/template 语法）。
+	//
+	// 模板与 TemplateFile 二选一；两者都为空时使用内置 ErrorBody 结构。
+	Template string `yaml:"template"`
+	// TemplateFile 是外部模板文件路径；与 Template 互斥。
+	TemplateFile string `yaml:"template_file"`
+	// MaxBodyBytes 是模板渲染结果的字节上限；<=0 时使用默认值。
+	// 该限制用于防止模板异常输出过大，避免错误响应本身消耗过多内存。
+	MaxBodyBytes int64 `yaml:"max_body_bytes"`
 }
 
 // EngineConfig 是检测引擎（Coraza + CRS）配置。
@@ -193,6 +219,10 @@ type EngineConfig struct {
 	Rules EngineRulesConfig `yaml:"rules"`
 	// InlineDirectives 是追加的 SecLang 指令（例如 SecRequestBodyAccess On）。
 	InlineDirectives []string `yaml:"inline_directives"`
+	// VirtualPatches 是启用的内置 CVE 虚拟补丁模板 ID 或 CVE 编号。
+	VirtualPatches []string `yaml:"virtual_patches"`
+	// VirtualPatchFiles 是自定义 SecLang 虚拟补丁文件。
+	VirtualPatchFiles []string `yaml:"virtual_patch_files"`
 	// Body 是引擎侧的请求体处理配置。
 	Body EngineBodyConfig `yaml:"body"`
 	// HotReload 是规则热加载配置。
@@ -347,8 +377,24 @@ type SiteConfig struct {
 	EngineMode string `yaml:"engine_mode"`
 	// Pipeline 是站点级校验链引用名；default 表示使用全局 pipeline。
 	Pipeline string `yaml:"pipeline"`
+	// Allowlist 是站点级 IP / CIDR 白名单；命中后直接放行该请求。
+	Allowlist []string `yaml:"allowlist"`
+	// Blocklist 是站点级 IP / CIDR 黑名单；命中后按 access_action 处理。
+	Blocklist []string `yaml:"blocklist"`
+	// AccessAction 是站点级 IP 黑名单动作：block / observe；为空时按 block。
+	AccessAction string `yaml:"access_action"`
+	// AccessScore 是站点级 IP 黑名单命中时累加的异常评分。
+	AccessScore int `yaml:"access_score"`
 	// Params 是站点级参数覆盖（键值对字符串形式）。
 	Params map[string]string `yaml:"params"`
+}
+
+// PipelineConfig 是一条具名校验链。
+type PipelineConfig struct {
+	// Name 是链路名，供 sites[].pipeline 引用。
+	Name string `yaml:"name"`
+	// Instances 是该链的校验单元声明，顺序与全局 pipeline 一致。
+	Instances []core.InstanceConfig `yaml:"instances"`
 }
 
 // StoreConfig 是单个共享存储实例的声明。
@@ -401,6 +447,11 @@ type BanConfig struct {
 	EscalateSteps []core.Duration `yaml:"escalate_steps"`
 	// EscalateWindow 是累进封禁的统计窗口。
 	EscalateWindow core.Duration `yaml:"escalate_window"`
+	// RenewOnRepeat 控制重复命中时是否刷新已有封禁的到期时间。
+	//
+	// false（默认）：封禁到期时间在首次封禁时确定，后续命中只计数/告警，不续期；
+	// true：恢复旧行为，每次命中都重新计算 TTL（持续攻击会导致封禁不断延长）。
+	RenewOnRepeat bool `yaml:"renew_on_repeat"`
 }
 
 // NotifyConfig 是告警外送的公共策略配置（需求 P1-7）。
@@ -563,4 +614,38 @@ type CacheConfig struct {
 	MaxBytes int64 `yaml:"max_bytes"`
 	// TTL 是缓存条目的默认存活时间。
 	TTL core.Duration `yaml:"ttl"`
+}
+
+// DatabaseConfig 是 SQLite 运行期数据库配置。
+type DatabaseConfig struct {
+	// Enabled 控制是否启用 SQLite 持久化。
+	//
+	// 关闭时沿用原有 stores[] 后端（redis / memory / file），名单与站点策略
+	// 继续以 YAML 为唯一来源；开启时封禁、IP 名单、站点策略和关键标量策略
+	// 在首次启动时导入数据库，之后以数据库为准。
+	Enabled bool `yaml:"enabled"`
+	// Path 是 SQLite 文件路径；enabled=true 时必填。
+	//
+	// 该路径本身属于部署配置，不会写入数据库。
+	Path string `yaml:"path"`
+	// BusyTimeout 是 SQLite 写锁等待时间。
+	BusyTimeout core.Duration `yaml:"busy_timeout"`
+	// ReloadInterval 是运行实例检查数据库策略版本的轮询间隔。
+	ReloadInterval core.Duration `yaml:"reload_interval"`
+	// Audit 是请求审计落库配置。
+	Audit DatabaseAuditConfig `yaml:"audit"`
+}
+
+// DatabaseAuditConfig 是请求审计落库配置。
+type DatabaseAuditConfig struct {
+	// Mode 是审计范围：off（关闭）/ events（只记录拦截、观察、蜜罐与异常）/ all（记录全部请求）。
+	Mode string `yaml:"mode"`
+	// Retention 是审计记录保留时长；<=0 表示不自动清理。
+	Retention core.Duration `yaml:"retention"`
+	// QueueSize 是异步写入队列长度。
+	QueueSize int `yaml:"queue_size"`
+	// BatchSize 是单次事务写入的最大条数。
+	BatchSize int `yaml:"batch_size"`
+	// FlushInterval 是队列空闲时的最大等待时间。
+	FlushInterval core.Duration `yaml:"flush_interval"`
 }

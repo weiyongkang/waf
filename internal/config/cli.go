@@ -62,8 +62,8 @@ func NewFlagSet(name string, output io.Writer) (*FlagSet, error) {
 	}
 
 	// 注册配置文件参数：可多次指定，后者覆盖前者。
-	fs.Var(&cf.configFiles, "config", "配置文件路径，可多次指定（后者覆盖前者）")
-	fs.Var(&cf.configFiles, "c", "配置文件路径（-config 的简写），可多次指定")
+	fs.Var(&cf.configFiles, "config", "配置文件或目录路径，可多次指定（后者覆盖前者；目录按文件名字典序加载并热重载）")
+	fs.Var(&cf.configFiles, "c", "配置文件或目录路径（-config 的简写），可多次指定")
 
 	// 注册通用覆盖参数：用于表达「配置路径 -> 值」，作为所有标量项的逃生通道。
 	fs.Var(&cf.generic, "set", "按路径覆盖配置项，格式 路径=值，可多次指定（例如 --set server.listen=:9081）")

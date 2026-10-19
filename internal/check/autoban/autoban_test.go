@@ -49,6 +49,14 @@ func (s *countingStore) Ban(_ context.Context, key string, _ time.Duration, _ st
 	return nil
 }
 
+// BanIfAbsent 记录封禁键并报告创建成功。
+func (s *countingStore) BanIfAbsent(_ context.Context, key string, _ time.Duration, _ string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.banned = append(s.banned, key)
+	return true, nil
+}
+
 // IsBanned 依据 bannedKeys 判定，未登记时表示未封禁。
 func (s *countingStore) IsBanned(_ context.Context, key string) (bool, time.Duration, error) {
 	return s.bannedKeys[key], 0, nil
@@ -334,17 +342,56 @@ func TestNewValidation(t *testing.T) {
 	}
 }
 
-// TestNewDefaultsTriggerOnBlock 覆盖：未配置 trigger_on 时默认只对拦截结论生效。
-func TestNewDefaultsTriggerOnBlock(t *testing.T) {
-	check := buildCheck(t, map[string]any{"threshold": 1, "window": "1m"},
-		newCountingStore(), &fakeBans{key: "ip:1.2.3.4"})
+// TestNewDefaultsTriggerOnBlockAndHoneypot 覆盖：未配置 trigger_on 时默认对拦截与蜜罐命中生效。
+func TestNewDefaultsTriggerOnBlockAndHoneypot(t *testing.T) {
+	for _, verdict := range []core.Verdict{core.VerdictBlock, core.VerdictHoneypot} {
+		t.Run(verdict.String(), func(t *testing.T) {
+			check := buildCheck(t, map[string]any{"threshold": 1, "window": "1m"},
+				newCountingStore(), &fakeBans{key: "ip:1.2.3.4"})
 
-	result, err := check.Evaluate(newVerdictContext(core.VerdictBlock))
+			result, err := check.Evaluate(newVerdictContext(verdict))
+			if err != nil {
+				t.Fatalf("校验返回错误：%v", err)
+			}
+			if result == nil || len(result.Bans) != 1 {
+				t.Fatalf("默认配置应对 %s 结论触发封禁，实际 %+v", verdict, result)
+			}
+		})
+	}
+}
+
+// TestEvaluateHoneypotCountsUntilThreshold 覆盖：蜜罐命中按窗口累计，达到阈值后封禁。
+func TestEvaluateHoneypotCountsUntilThreshold(t *testing.T) {
+	store := newCountingStore()
+	bans := &fakeBans{key: "ip:1.2.3.4"}
+	check := buildCheck(t, map[string]any{
+		"trigger_on": []any{"honeypot"},
+		"threshold":  2,
+		"window":     "5m",
+		"ttl":        "30m",
+	}, store, bans)
+
+	rctx := newVerdictContext(core.VerdictHoneypot)
+	result, err := check.Evaluate(rctx)
 	if err != nil {
-		t.Fatalf("校验返回错误：%v", err)
+		t.Fatalf("首次蜜罐命中校验返回错误：%v", err)
+	}
+	if result != nil {
+		t.Fatalf("首次蜜罐命中未达阈值时不应封禁，实际 %+v", result)
+	}
+
+	result, err = check.Evaluate(rctx)
+	if err != nil {
+		t.Fatalf("第二次蜜罐命中校验返回错误：%v", err)
 	}
 	if result == nil || len(result.Bans) != 1 {
-		t.Fatalf("默认配置应对拦截结论触发封禁，实际 %+v", result)
+		t.Fatalf("窗口内第二次蜜罐命中应触发封禁，实际 %+v", result)
+	}
+	if result.Bans[0].Key != "ip:1.2.3.4" {
+		t.Fatalf("封禁键不符，实际 %q", result.Bans[0].Key)
+	}
+	if result.Bans[0].TTL != 30*time.Minute {
+		t.Fatalf("封禁时长应为 30m，实际 %s", result.Bans[0].TTL)
 	}
 }
 

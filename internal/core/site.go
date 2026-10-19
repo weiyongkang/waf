@@ -19,6 +19,15 @@ type Site struct {
 	Hosts []string
 	// EngineMode 是引擎模式覆盖：inherit 表示继承全局 engine.mode。
 	EngineMode string
+	// Pipeline 是站点引用的具名校验链名；空值或 default 表示全局 pipeline。
+	Pipeline string
+	// Allowlist / Blocklist 是站点级 IP / CIDR 名单。
+	Allowlist []string
+	Blocklist []string
+	// AccessAction 是 Blocklist 命中后的动作：block / observe。
+	AccessAction string
+	// AccessScore 是 Blocklist 命中时累加的异常评分。
+	AccessScore int
 	// Params 是站点级参数覆盖（例如更严格的限速阈值），键为参数名。
 	Params map[string]string
 }

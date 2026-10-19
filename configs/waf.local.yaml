@@ -197,12 +197,13 @@ engine:
         enabled: true
         content_types:
           - '^(?:application|text)/(?:[^;,\s]+\+)?xml(?:\s*;.*)?$'
-  # 规则热加载：规则文件变化后原子替换检测引擎，失败保留旧引擎继续服务。
+  # 规则热加载：CRS 规则目录与蜜罐 rules_dir 变化后原子替换规则实例，
+  # 失败保留旧规则继续服务。
   hot_reload:
     enabled: true
     # 去抖动：指纹变化后再等一个周期复核，避免打包/解包过程中「边写边改」触发多次重载。
     debounce: 1s
-    # 指纹轮询间隔。为什么用轮询而不是 inotify：
+    # 指纹轮询间隔（CRS 与蜜罐共用）。为什么用轮询而不是 inotify：
     #   - 交付物是静态单二进制，引入 fsnotify 会增加依赖面（需求 R10 / R14）；
     #   - 轮询在挂载卷 / 网络文件系统 / 容器 overlay 下行为一致；
     #   - 指纹只做 stat（不读文件内容），几十个规则文件的代价可忽略（需求 R13）。
@@ -291,6 +292,21 @@ pipeline:
   #       coraza 必须拆成「请求头实例 + 请求体实例」两个实例：只有存在启用的
   #       body 阶段实例时，运行期才会真正读取请求体（按需读体，需求 R13）。
 
+  # -- 蜜罐
+  - name: honeypot
+    type: honeypot
+    enabled: true
+    order: 1
+    phase: pre
+    on_error: pass
+    settings:
+      # 命中时累加的异常评分，可被 threshold / autoban 使用
+      score: 10
+      # 命中是否产生告警（默认 true）
+      alert: true
+      # 内联规则；目录规则可通过 rules_dir 加载（递归读取 .yaml / .yml）。
+      # 配置后按 engine.hot_reload.poll_interval 扫描目录，文件变化自动热加载。
+      rules_dir: "./rules/honeypot"
   # --- pre 阶段：纯元数据判断，代价最低，排在链首 ---
   - name: ban-list
     type: banlist
@@ -411,8 +427,9 @@ pipeline:
     order: 90
     phase: post
     settings:
-      # 计入触发条件的链结论（block / ratelimit / observe ...）；any 表示任何终态结论
-      trigger_on: [block, ratelimit]
+      # 计入触发条件的链结论（block / ratelimit / honeypot / observe ...）；any 表示任何终态结论。
+      # honeypot 必须显式列入（或使用 any）才会把蜜罐命中计入下面的阈值与窗口。
+      trigger_on: [block, ratelimit, honeypot]
       # 最低命中严重度门槛（info / low / medium / high / critical；留空表示不设门槛）。
       # 为什么需要它：命中次数衡量的是「量」，严重度衡量的是「质」；
       # 不设门槛时，来源只要把低危规则刷够次数就会被封，误伤概率远大于收益。

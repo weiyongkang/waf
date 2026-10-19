@@ -28,16 +28,26 @@ package main
 import (
 	// autoban 把命中结论转化为内部封禁动作（PhasePost）。
 	_ "github.com/weiyongkang/waf/internal/check/autoban"
+	// apisec 提供本地 OpenAPI 请求契约校验（PhaseBody）。
+	_ "github.com/weiyongkang/waf/internal/check/apisec"
 	// banlist 查询内部封禁名单（PhasePre）。
 	_ "github.com/weiyongkang/waf/internal/check/banlist"
+	// challenge 提供本地 Basic / 签名 Cookie 身份校验（PhaseRequest）。
+	_ "github.com/weiyongkang/waf/internal/check/challenge"
 	// coraza 是检测引擎（Coraza + CRS，PhaseRequest / PhaseBody）。
 	_ "github.com/weiyongkang/waf/internal/check/coraza"
+	// geoip 提供本地 GeoIP 地域访问控制（PhaseRequest）。
+	_ "github.com/weiyongkang/waf/internal/check/geoip"
+	// honeypot 提供诱饵端点与规则化伪造响应（PhasePre）。
+	_ "github.com/weiyongkang/waf/internal/check/honeypot"
 	// ipaccess 提供 IP 黑白名单（PhasePre）。
 	_ "github.com/weiyongkang/waf/internal/check/ipaccess"
 	// passthrough 是空校验单元，用于装配冒烟与压测基线对照。
 	_ "github.com/weiyongkang/waf/internal/check/passthrough"
 	// ratelimit 提供多维限速（共享存储计数）。
 	_ "github.com/weiyongkang/waf/internal/check/ratelimit"
+	// threatintel 提供本地 CIDR / ASN / 域名威胁情报匹配。
+	_ "github.com/weiyongkang/waf/internal/check/threatintel"
 	// threshold 聚合异常评分并给出阈值结论（PhasePost）。
 	_ "github.com/weiyongkang/waf/internal/check/threshold"
 

@@ -13,6 +13,9 @@
 --   放行：HTTP 2xx，无响应体；
 --   拦截：WAF 通过 X-WAF-Code / X-WAF-Verdict / X-WAF-Rule-Id 等响应头表达真实语义，
 --         本脚本据此还原对外状态码与错误体。
+--   蜜罐：WAF 先返回 403 + X-WAF-Code: WAF_HONEYPOT 的渲染元数据，
+--         本脚本再通过 /__waf_deny 回源 /waf/deny，由渲染端点按原始请求
+--         重新匹配规则并返回最终状态码 / 响应头 / 响应体。
 --
 -- 为什么「原始请求信息」必须由本脚本显式注入（而不是依赖 $request_uri 等变量）：
 --   ngx.location.capture 创建的是**子请求**，子请求的方法与 URI 属于子请求自身。
@@ -60,14 +63,31 @@ local PASSTHROUGH_HEADERS = {
     "X-WAF-Verdict",
     "X-WAF-Code",
     "X-WAF-Rule-Id",
+    "X-WAF-Target",
+    "X-WAF-Ban-Scope",
     "X-WAF-Version",
     "X-WAF-Site",
     "Retry-After",
     "WWW-Authenticate",
 }
 
+-- 逐跳响应头：由 Nginx 根据实际连接与响应体管理，不能从子请求原样复制。
+local HOP_BY_HOP_HEADERS = {
+    connection = true,
+    ["content-length"] = true,
+    ["keep-alive"] = true,
+    ["proxy-connection"] = true,
+    te = true,
+    trailer = true,
+    ["transfer-encoding"] = true,
+    upgrade = true,
+}
+
 -- 鉴权子请求端点（对应 nginx.conf 中的 location = /__waf_auth）。
 local AUTH_SUBREQUEST_URI = "/__waf_auth"
+
+-- 蜜罐/错误体渲染子请求端点（对应 nginx.conf 中的 location = /__waf_deny）。
+local RENDER_SUBREQUEST_URI = "/__waf_deny"
 
 -- 兜底 JSON 错误体（含变量插值）：WAF 未返回响应体时使用，保证响应格式始终是 JSON。
 local FALLBACK_BODY_TEMPLATE =
@@ -173,6 +193,35 @@ local function emitDeny(res, status)
     ngx.exit(ngx.HTTP_OK)
 end
 
+-- emitDirect 原样回写渲染端点返回的最终响应（蜜罐伪造页面）。
+--
+-- 渲染端点可以返回 200/404/500 等任意规则状态；这里必须使用 res.status，
+-- 不能套用鉴权响应的 403 控制码。
+local function emitDirect(res)
+    if not res then
+        emitDeny(nil, 503)
+        return
+    end
+
+    -- 复制规则定义的全部响应头（Server / X-Powered-By 等），只剔除逐跳头。
+    for name, value in pairs(res.headers or {}) do
+        if not HOP_BY_HOP_HEADERS[string.lower(name)] then
+            ngx.header[name] = value
+        end
+    end
+    if not ngx.header["Content-Type"] then
+        ngx.header["Content-Type"] = "text/plain; charset=utf-8"
+    end
+
+    ngx.status = res.status
+    if res.body and #res.body > 0 and res.status ~= 204 and res.status ~= 304 then
+        ngx.print(res.body)
+    end
+    -- 与 emitDeny 相同：状态码已写入 ngx.status，exit(200) 只负责结束处理，
+    -- 避免传入错误码触发 Nginx 的 error_page 覆盖已写好的响应体。
+    ngx.exit(ngx.HTTP_OK)
+end
+
 -- -----------------------------------------------------------------------------
 -- 对外接口
 -- -----------------------------------------------------------------------------
@@ -220,6 +269,22 @@ function _M.check()
         end
         ngx.log(ngx.ERR, "waf_auth: 鉴权子请求失败，按失败关闭策略拦截请求")
         emitDeny(nil, 503)
+        return
+    end
+
+    -- 蜜罐命中：鉴权响应只带控制元数据，统一回源渲染端点获取最终响应。
+    if res.headers["X-WAF-Code"] == "WAF_HONEYPOT"
+        or res.headers["X-WAF-Verdict"] == "honeypot" then
+        local request_id = res.headers["X-WAF-Request-Id"] or ""
+        local render = ngx.location.capture(
+            RENDER_SUBREQUEST_URI .. "?code=WAF_HONEYPOT&request_id=" .. ngx.escape_uri(request_id),
+            { method = ngx.HTTP_GET, ctx = ngx.ctx }
+        )
+        if not render or render.status == 0 then
+            emitDeny(nil, 503)
+            return
+        end
+        emitDirect(render)
         return
     end
 

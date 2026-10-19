@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -230,6 +231,70 @@ func TestNewFiltersDisabledAndSorts(t *testing.T) {
 		if check.name == "disabled" {
 			t.Fatal("enabled=false 的实例不应被构造")
 		}
+	}
+}
+
+// TestMergeResultKeepsResponseOverride 覆盖：蜜罐直接响应必须随终态结论进入最终 Result。
+func TestMergeResultKeepsResponseOverride(t *testing.T) {
+	rctx := core.NewRequestContext("REQ-MERGE", time.Now())
+	merged := &core.Result{Verdict: core.VerdictContinue}
+	src := core.NewResult("honeypot", core.VerdictHoneypot).WithResponse(core.ResponseOverride{
+		Status: 200,
+		Body:   "decoy",
+	})
+	mergeResult(rctx, merged, src)
+
+	if merged.Verdict != core.VerdictHoneypot {
+		t.Fatalf("verdict = %s，期望 honeypot", merged.Verdict)
+	}
+	if merged.Response == nil || merged.Response.Body != "decoy" {
+		t.Fatalf("ResponseOverride 丢失：%+v", merged.Response)
+	}
+}
+
+// honeypotStubType 是测试用蜜罐匹配器类型。
+const honeypotStubType = "test-pipeline-honeypot"
+
+// honeypotStub 只实现 HoneypotMatcher，用于验证 pipeline 的按需重匹配。
+type honeypotStub struct {
+	name string
+}
+
+func (h *honeypotStub) Name() string                                        { return h.name }
+func (h *honeypotStub) Type() string                                        { return honeypotStubType }
+func (h *honeypotStub) Phase() core.Phase                                   { return core.PhasePre }
+func (h *honeypotStub) Order() int                                          { return 1 }
+func (h *honeypotStub) Evaluate(*core.RequestContext) (*core.Result, error) { return nil, nil }
+func (h *honeypotStub) Close() error                                        { return nil }
+func (h *honeypotStub) MatchHoneypot(*core.RequestContext) *core.Result {
+	return core.NewResult(h.name, core.VerdictHoneypot).WithResponse(core.ResponseOverride{
+		Status: http.StatusOK,
+		Body:   "honeypot",
+	})
+}
+
+func init() {
+	core.RegisterCheck(honeypotStubType, func(inst core.InstanceConfig, _ *core.Deps) (core.Check, error) {
+		return &honeypotStub{name: inst.Name}, nil
+	})
+}
+
+// TestMatchHoneypotUsesRegisteredMatcher 覆盖渲染端点复用的匹配入口。
+func TestMatchHoneypotUsesRegisteredMatcher(t *testing.T) {
+	p, err := New(Config{Instances: []core.InstanceConfig{{
+		Name:    "hp",
+		Type:    honeypotStubType,
+		Enabled: true,
+		Phase:   core.PhasePre,
+	}}}, nil)
+	if err != nil {
+		t.Fatalf("构造 pipeline 失败：%v", err)
+	}
+	defer func() { _ = p.Close() }()
+
+	result := p.MatchHoneypot(core.NewRequestContext("REQ-HP", time.Now()))
+	if result == nil || result.Response == nil || result.Response.Body != "honeypot" {
+		t.Fatalf("MatchHoneypot 未返回预期响应：%+v", result)
 	}
 }
 

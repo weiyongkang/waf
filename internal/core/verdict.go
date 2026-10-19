@@ -32,6 +32,12 @@ const (
 	VerdictChallenge
 	// VerdictUnavailable 表示检测服务不可用（失败关闭），对外返回 503。
 	VerdictUnavailable
+	// VerdictHoneypot 表示命中蜜罐规则，需要按规则配置直接返回伪造响应。
+	//
+	// 该结论与 VerdictBlock 的区别：蜜罐通常返回业务化的状态码（例如 200 + 假页面），
+	// 目的是欺骗扫描器而不是告诉对方「已被 WAF 拦截」。因此它短路校验链、
+	// 由 responder 使用 Result.Response 覆盖响应，但不计入 waf_blocked_total。
+	VerdictHoneypot
 )
 
 // verdictName 是判定结论到名称的映射，用于日志、指标与配置摘要。
@@ -46,6 +52,7 @@ var verdictName = map[Verdict]string{
 	VerdictBadRequest:   "bad_request",
 	VerdictChallenge:    "challenge",
 	VerdictUnavailable:  "unavailable",
+	VerdictHoneypot:     "honeypot",
 }
 
 // String 返回判定结论的小写名称，用于 JSON 日志字段与 Prometheus 标签。

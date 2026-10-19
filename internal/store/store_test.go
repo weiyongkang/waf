@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -147,6 +149,80 @@ func TestMemoryStoreBanLifecycle(t *testing.T) {
 	}
 }
 
+// TestMemoryStoreBanIfAbsentDoesNotRenew 覆盖：自动封禁只按首次封禁时间计时。
+func TestMemoryStoreBanIfAbsentDoesNotRenew(t *testing.T) {
+	clock := newFakeClock()
+	memoryStore := newMemoryStore(t, clock, 0)
+	ctx := context.Background()
+
+	created, err := memoryStore.BanIfAbsent(ctx, "ip:1.2.3.4", 30*time.Minute, "首次")
+	if err != nil || !created {
+		t.Fatalf("首次自动封禁应创建记录，实际 created=%v err=%v", created, err)
+	}
+	first, err := memoryStore.List(ctx)
+	if err != nil || len(first) != 1 {
+		t.Fatalf("首次封禁后名单不符：entries=%+v err=%v", first, err)
+	}
+	firstBannedAt, firstExpireAt := first[0].BannedAt, first[0].ExpireAt
+
+	clock.Advance(10 * time.Minute)
+	created, err = memoryStore.BanIfAbsent(ctx, "ip:1.2.3.4", 2*time.Hour, "重复命中")
+	if err != nil {
+		t.Fatalf("重复自动封禁失败：%v", err)
+	}
+	if created {
+		t.Fatal("有效记录已存在时 BanIfAbsent 不应覆盖")
+	}
+	banned, remaining, err := memoryStore.IsBanned(ctx, "ip:1.2.3.4")
+	if err != nil || !banned || remaining != 20*time.Minute {
+		t.Fatalf("重复封禁不应续期，实际 banned=%v remaining=%s err=%v", banned, remaining, err)
+	}
+	second, err := memoryStore.List(ctx)
+	if err != nil || len(second) != 1 {
+		t.Fatalf("重复封禁不应新增记录：entries=%+v err=%v", second, err)
+	}
+	if !second[0].BannedAt.Equal(firstBannedAt) || !second[0].ExpireAt.Equal(firstExpireAt) {
+		t.Fatalf("重复封禁改写了首次时间：before=(%s,%s) after=(%s,%s)",
+			firstBannedAt, firstExpireAt, second[0].BannedAt, second[0].ExpireAt)
+	}
+
+	// 到期后自动失效；下一次自动封禁必须从当前时刻重新计时。
+	clock.Advance(21 * time.Minute)
+	if banned, _, _ := memoryStore.IsBanned(ctx, "ip:1.2.3.4"); banned {
+		t.Fatal("TTL 到期后应自动解封")
+	}
+	created, err = memoryStore.BanIfAbsent(ctx, "ip:1.2.3.4", 30*time.Minute, "重新封禁")
+	if err != nil || !created {
+		t.Fatalf("到期后应允许重新创建封禁，实际 created=%v err=%v", created, err)
+	}
+	if _, remaining, _ := memoryStore.IsBanned(ctx, "ip:1.2.3.4"); remaining != 30*time.Minute {
+		t.Fatalf("到期后重新封禁应获得完整 TTL，实际 %s", remaining)
+	}
+}
+
+// TestBanCacheNeverExceedsRemoteTTL 覆盖：本地缓存不得超过 Redis 中的真实剩余 TTL。
+func TestBanCacheNeverExceedsRemoteTTL(t *testing.T) {
+	clock := newFakeClock()
+	cache := newBanCache(5*time.Minute, 100, clock)
+
+	cache.set("ip:1.2.3.4", 2*time.Minute)
+	clock.Advance(2 * time.Minute)
+	if cache.has("ip:1.2.3.4") {
+		t.Fatal("Redis 封禁到期后本地缓存必须同时失效，否则会继续误拦截")
+	}
+
+	// remaining <= 0 表示远端永不过期或剩余不足 1 秒；缓存仍按本地 TTL 收敛。
+	cache.set("ip:5.6.7.8", 0)
+	clock.Advance(4 * time.Minute)
+	if !cache.has("ip:5.6.7.8") {
+		t.Fatal("未超过本地缓存 TTL 时应命中缓存")
+	}
+	clock.Advance(time.Minute)
+	if cache.has("ip:5.6.7.8") {
+		t.Fatal("超过本地缓存 TTL 后应失效")
+	}
+}
+
 // TestMemoryStoreCapacityProtection 覆盖：条目达到上限时返回容量错误而不是静默丢弃。
 func TestMemoryStoreCapacityProtection(t *testing.T) {
 	memoryStore := newMemoryStore(t, newFakeClock(), 2)
@@ -236,6 +312,60 @@ func TestFileStoreReplayAndUnban(t *testing.T) {
 	defer func() { _ = third.Close() }()
 	if banned, _, _ := third.IsBanned(ctx, "ip:1.2.3.4"); banned {
 		t.Fatal("已过期的封禁记录不应在回放时恢复")
+	}
+}
+
+// TestFileStoreBanIfAbsentPersistsFirstExpiry 覆盖：文件后端重复封禁不追加记录，
+// 且重启后仍沿用首次封禁时写入的绝对到期时间。
+func TestFileStoreBanIfAbsentPersistsFirstExpiry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "waf-ban.jsonl")
+	clock := newFakeClock()
+	ctx := context.Background()
+
+	first, err := NewFileStore(FileStoreOptions{Name: "default", Prefix: "test:", Path: path, Clock: clock})
+	if err != nil {
+		t.Fatalf("构造文件存储失败：%v", err)
+	}
+	created, err := first.BanIfAbsent(ctx, "ip:1.2.3.4", 30*time.Minute, "首次")
+	if err != nil || !created {
+		t.Fatalf("首次自动封禁失败：created=%v err=%v", created, err)
+	}
+	clock.Advance(10 * time.Minute)
+	created, err = first.BanIfAbsent(ctx, "ip:1.2.3.4", 2*time.Hour, "重复命中")
+	if err != nil || created {
+		t.Fatalf("重复自动封禁不应创建新记录：created=%v err=%v", created, err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("关闭文件存储失败：%v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("读取持久化文件失败：%v", err)
+	}
+	if count := strings.Count(string(raw), `"op":"ban"`); count != 1 {
+		t.Fatalf("重复封禁不应追加持久化记录，实际 ban 记录数 %d：%s", count, raw)
+	}
+
+	second, err := NewFileStore(FileStoreOptions{Name: "default", Prefix: "test:", Path: path, Clock: clock})
+	if err != nil {
+		t.Fatalf("重启文件存储失败：%v", err)
+	}
+	defer func() { _ = second.Close() }()
+
+	banned, remaining, err := second.IsBanned(ctx, "ip:1.2.3.4")
+	if err != nil || !banned {
+		t.Fatalf("重启后应恢复封禁，实际 banned=%v err=%v", banned, err)
+	}
+	if remaining != 20*time.Minute {
+		t.Fatalf("重启后应沿用首次到期时间（剩余 20m），实际 %s", remaining)
+	}
+	entries, err := second.List(ctx)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("重启后名单不符：entries=%+v err=%v", entries, err)
+	}
+	if !entries[0].BannedAt.Equal(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("重启后首次封禁时间被改写：%s", entries[0].BannedAt)
 	}
 }
 

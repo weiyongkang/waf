@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -40,6 +42,12 @@ type WatchConfig struct {
 	Debounce time.Duration
 	// MarkerFile 是可选的「手动触发」标记文件：其修改时间变化也会触发回调。
 	MarkerFile string
+	// Recursive 为 true 时递归遍历 Dirs 下的所有子目录。
+	//
+	// 用于蜜罐规则目录（rules_dir 本身按递归方式加载）：若只监听顶层目录，
+	// 子目录中的规则文件更新不会被发现。CRS 规则目录默认保持非递归，
+	// 与 rules.Load 的 glob 语义一致。
+	Recursive bool
 	// Logger 是系统日志器，可为 nil。
 	Logger *slog.Logger
 }
@@ -82,7 +90,7 @@ func NewWatcher(cfg WatchConfig) (*Watcher, error) {
 		logger: cfg.Logger,
 	}
 
-	fingerprint, err := Fingerprint(cfg.Dirs, cfg.Include, cfg.DataInclude)
+	fingerprint, err := fingerprintFor(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +135,7 @@ func (w *Watcher) Stop() {
 
 // poll 执行一轮指纹比对。
 func (w *Watcher) poll(onChange func()) {
-	fingerprint, err := Fingerprint(w.cfg.Dirs, w.cfg.Include, w.cfg.DataInclude)
+	fingerprint, err := fingerprintFor(w.cfg)
 	if err != nil {
 		// 目录暂时不可访问（例如正在被原子替换）不视为错误：
 		// 下一轮轮询会重新计算，避免因一次瞬时状态就刷屏告警。
@@ -146,7 +154,7 @@ func (w *Watcher) poll(onChange func()) {
 	// 避免「文件正在被写入」的中间状态触发一次注定失败的重载。
 	if w.cfg.Debounce > 0 {
 		time.Sleep(w.cfg.Debounce)
-		confirmed, err := Fingerprint(w.cfg.Dirs, w.cfg.Include, w.cfg.DataInclude)
+		confirmed, err := fingerprintFor(w.cfg)
 		if err != nil {
 			w.logf("WARN", "规则目录指纹复核失败，跳过本轮检查", "error", err.Error())
 			return
@@ -160,6 +168,14 @@ func (w *Watcher) poll(onChange func()) {
 
 	w.logf("INFO", "检测到规则文件变化，开始重载", "fingerprint", shortHash(fingerprint))
 	onChange()
+}
+
+// fingerprintFor 按监听配置计算指纹。
+func fingerprintFor(cfg WatchConfig) (string, error) {
+	if cfg.Recursive {
+		return FingerprintRecursive(cfg.Dirs, cfg.Include, cfg.DataInclude)
+	}
+	return Fingerprint(cfg.Dirs, cfg.Include, cfg.DataInclude)
 }
 
 // logf 写系统日志；logger 为 nil 时静默。
@@ -235,6 +251,97 @@ func Fingerprint(dirs []string, include []string, dataInclude []string) (string,
 
 	sort.Strings(entries)
 	return hashOf(strings.Join(entries, "\n")), nil
+}
+
+// FingerprintRecursive 递归计算规则目录指纹。
+//
+// 匹配规则与 Fingerprint 保持一致：模式优先匹配相对路径，也匹配文件名；
+// 这样 include: ["*.yaml"] 可以覆盖任意深度的子目录，符合蜜罐 rules_dir
+// 的递归加载语义。隐藏文件不参与指纹（蜜罐加载器会跳过它们）。
+func FingerprintRecursive(dirs []string, include []string, dataInclude []string) (string, error) {
+	patterns := append(append([]string{}, include...), dataInclude...)
+	if len(patterns) == 0 {
+		patterns = append(append([]string{}, defaultIncludePatterns...), defaultDataPatterns...)
+	}
+	for _, pattern := range patterns {
+		if _, err := path.Match(pattern, ""); err != nil {
+			return "", fmt.Errorf("规则目录匹配模式 %q 非法：%w", pattern, err)
+		}
+	}
+
+	var entries []string
+	for _, dir := range dirs {
+		trimmed := strings.TrimSpace(dir)
+		if trimmed == "" {
+			continue
+		}
+		root, err := filepath.Abs(trimmed)
+		if err != nil {
+			return "", fmt.Errorf("解析规则目录 %s 失败：%w", trimmed, err)
+		}
+		info, err := os.Stat(root)
+		if err != nil {
+			return "", fmt.Errorf("规则目录 %s 不可访问：%w", trimmed, err)
+		}
+		if !info.IsDir() {
+			return "", fmt.Errorf("规则目录 %s 不是目录", trimmed)
+		}
+
+		err = filepath.WalkDir(root, func(filePath string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			// 与蜜罐加载器一致：跳过以点开头的文件。
+			if strings.HasPrefix(entry.Name(), ".") {
+				return nil
+			}
+			rel, err := filepath.Rel(root, filePath)
+			if err != nil {
+				return err
+			}
+			if !matchAnyPattern(patterns, filepath.ToSlash(rel)) {
+				return nil
+			}
+			fileInfo, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			entries = append(entries, fmt.Sprintf("%s|%d|%d",
+				filepath.ToSlash(filePath), fileInfo.Size(), fileInfo.ModTime().UnixNano()))
+			return nil
+		})
+		if err != nil {
+			return "", fmt.Errorf("遍历规则目录 %s 失败：%w", trimmed, err)
+		}
+	}
+
+	if len(entries) == 0 {
+		return hashOf("<empty>"), nil
+	}
+	sort.Strings(entries)
+	return hashOf(strings.Join(entries, "\n")), nil
+}
+
+// matchAnyPattern 判断相对路径是否匹配任一模式。
+//
+// 先按相对路径匹配，再按文件名匹配；后者让 "*.yaml" 这类常见写法
+// 在递归模式下也能覆盖子目录中的文件。
+func matchAnyPattern(patterns []string, rel string) bool {
+	base := path.Base(rel)
+	for _, pattern := range patterns {
+		if matched, err := path.Match(pattern, rel); err == nil && matched {
+			return true
+		}
+		if base != rel {
+			if matched, err := path.Match(pattern, base); err == nil && matched {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // hashOf 计算字符串的 SHA-256 十六进制摘要。

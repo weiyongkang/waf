@@ -66,6 +66,8 @@ type RedisStore struct {
 	script *redis.Script
 	// cache 是本地「已封禁」结论缓存。
 	cache *banCache
+	// clock 是时间源，用于记录首次封禁时间。
+	clock core.Clock
 	// logger 是系统日志器。
 	logger *slog.Logger
 	// metrics 是指标写入接口。
@@ -133,11 +135,16 @@ func NewRedisStore(opts RedisOptions) (*RedisStore, error) {
 		metrics = core.NoopMetrics{}
 	}
 
+	clock := opts.Clock
+	if clock == nil {
+		clock = core.SystemClock{}
+	}
 	store := &RedisStore{
 		name:     opts.Name,
 		settings: settings,
 		script:   redis.NewScript(incrScript),
-		cache:    newBanCache(settings.LocalCacheTTL.Duration(), settings.LocalCacheEntries, opts.Clock),
+		cache:    newBanCache(settings.LocalCacheTTL.Duration(), settings.LocalCacheEntries, clock),
+		clock:    clock,
 		logger:   opts.Logger,
 		metrics:  metrics,
 	}
@@ -198,14 +205,12 @@ func (s *RedisStore) Incr(ctx context.Context, key string, window time.Duration)
 	return count, time.Duration(ttlMillis) * time.Millisecond, nil
 }
 
-// Ban 把 key 加入封禁名单（core.Store 实现）。
+// Ban 把 key 加入封禁名单，已存在时强制覆盖（core.Store 实现）。
 func (s *RedisStore) Ban(ctx context.Context, key string, ttl time.Duration, reason string) error {
-	payload, err := json.Marshal(map[string]any{
-		"reason": reason,
-		"at":     time.Now().Format(time.RFC3339Nano),
-	})
+	now := s.clock.Now()
+	payload, err := encodeBanValue(reason, now, expiryFrom(now, ttl))
 	if err != nil {
-		return fmt.Errorf("封禁值序列化失败：%w", err)
+		return err
 	}
 
 	redisKey := s.banKey(key)
@@ -221,6 +226,29 @@ func (s *RedisStore) Ban(ctx context.Context, key string, ttl time.Duration, rea
 
 	s.cache.remove(key)
 	return nil
+}
+
+// BanIfAbsent 仅在 key 不存在时写入封禁记录（core.Store 实现）。
+//
+// 使用 Redis 的 SET NX 保证跨实例原子性：并发请求中只有一个能创建封禁，
+// 其余请求不会修改已有记录的 TTL。
+func (s *RedisStore) BanIfAbsent(ctx context.Context, key string, ttl time.Duration, reason string) (bool, error) {
+	now := s.clock.Now()
+	payload, err := encodeBanValue(reason, now, expiryFrom(now, ttl))
+	if err != nil {
+		return false, err
+	}
+
+	created, err := s.client.SetNX(ctx, s.banKey(key), payload, ttl).Result()
+	if err != nil {
+		return false, s.wrapError("写入封禁名单", err)
+	}
+	if created {
+		// 本地缓存只缓存「已封禁」结论，新建记录时清除可能存在的旧条目，
+		// 让后续查询以 Redis 中的真实 TTL 为准。
+		s.cache.remove(key)
+	}
+	return created, nil
 }
 
 // IsBanned 查询封禁状态与剩余时长（core.Store 实现）。
@@ -239,10 +267,22 @@ func (s *RedisStore) IsBanned(ctx context.Context, key string) (bool, time.Durat
 		return false, 0, s.wrapError("查询封禁名单", err)
 	}
 
-	s.cache.set(key)
-
 	ttl, err := s.client.TTL(ctx, redisKey).Result()
-	if err != nil || ttl < 0 {
+	if err != nil {
+		// GET 已确认记录存在，但 TTL 查询失败时不能据此断言「未封禁」；
+		// 按已封禁处理且不写本地缓存，避免把一次临时故障放大成缓存误拦截。
+		return true, 0, nil
+	}
+	if ttl == -2 {
+		// GET 与 TTL 之间封禁恰好到期：以 Redis 的最终状态为准，立即解除拦截。
+		s.cache.remove(key)
+		return false, 0, nil
+	}
+	// 本地缓存的有效期不能超过 Redis 中封禁的剩余 TTL，
+	// 否则封禁到期后本实例仍会继续拦截最多 local_cache_ttl。
+	s.cache.set(key, ttl)
+	if ttl <= 0 {
+		// -1 表示永不过期；0 通常表示剩余不足 1 秒。两者都不影响「已封禁」结论。
 		return true, 0, nil
 	}
 	return true, ttl, nil
@@ -265,22 +305,32 @@ func (s *RedisStore) List(ctx context.Context) ([]core.BanEntry, error) {
 		}
 
 		for _, redisKey := range keys {
-			reason := ""
-			if raw, err := s.client.Get(ctx, redisKey).Result(); err == nil {
-				reason = decodeReason(raw)
-			} else if err != redis.Nil {
+			raw, err := s.client.Get(ctx, redisKey).Result()
+			if err == redis.Nil {
+				// SCAN 与 GET 之间记录已到期：不要把它作为「有效封禁」输出。
+				continue
+			}
+			if err != nil {
 				return nil, s.wrapError("读取封禁记录", err)
 			}
+			reason, bannedAt, expireAt := decodeBanValue(raw)
 
 			ttl := time.Duration(0)
-			if value, err := s.client.TTL(ctx, redisKey).Result(); err == nil && value > 0 {
+			value, err := s.client.TTL(ctx, redisKey).Result()
+			if err == nil && value == -2 {
+				// 同上：GET 与 TTL 之间恰好到期。
+				continue
+			}
+			if err == nil && value > 0 {
 				ttl = value
 			}
 
 			entries = append(entries, core.BanEntry{
-				Key:    strings.TrimPrefix(redisKey, s.settings.Prefix+banNamespace),
-				Reason: reason,
-				TTL:    ttl,
+				Key:      strings.TrimPrefix(redisKey, s.settings.Prefix+banNamespace),
+				Reason:   reason,
+				TTL:      ttl,
+				BannedAt: bannedAt,
+				ExpireAt: expireAt,
 			})
 		}
 
@@ -451,18 +501,59 @@ func normalizeAddrs(addrs []string) []string {
 	return normalized
 }
 
-// decodeReason 从封禁值中解析出封禁原因；解析失败时返回原始文本。
+// encodeBanValue 把封禁原因与时间元数据编码为 Redis 值。
+func encodeBanValue(reason string, bannedAt, expireAt time.Time) ([]byte, error) {
+	payload := map[string]any{
+		"reason":    reason,
+		"banned_at": bannedAt.Format(time.RFC3339Nano),
+	}
+	if !expireAt.IsZero() {
+		payload["expire_at"] = expireAt.Format(time.RFC3339Nano)
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("封禁值序列化失败：%w", err)
+	}
+	return encoded, nil
+}
+
+// decodeBanValue 从封禁值中解析原因与时间元数据。
 //
 // 之所以容错：名单里可能残留人工写入的裸文本（运维直接用 redis-cli 加名单），
-// 此时应把它当作原因展示，而不是让 `waf ban list` 直接报错。
-func decodeReason(raw string) string {
+// 或旧版本只写入了 at / reason 字段；解析失败时按纯文本原因展示，
+// 时间字段缺失时返回零值，由调用方按「未知」处理。
+func decodeBanValue(raw string) (reason string, bannedAt, expireAt time.Time) {
 	var payload struct {
-		Reason string `json:"reason"`
+		Reason   string `json:"reason"`
+		BannedAt string `json:"banned_at"`
+		At       string `json:"at"`
+		ExpireAt string `json:"expire_at"`
 	}
-	if err := json.Unmarshal([]byte(raw), &payload); err == nil && payload.Reason != "" {
-		return payload.Reason
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return raw, time.Time{}, time.Time{}
 	}
-	return raw
+	reason = payload.Reason
+	if reason == "" {
+		reason = raw
+	}
+	bannedAt = parseRFC3339(payload.BannedAt)
+	if bannedAt.IsZero() {
+		bannedAt = parseRFC3339(payload.At)
+	}
+	expireAt = parseRFC3339(payload.ExpireAt)
+	return reason, bannedAt, expireAt
+}
+
+// parseRFC3339 解析时间字段；空串或格式非法时返回零值。
+func parseRFC3339(value string) time.Time {
+	if value == "" {
+		return time.Time{}
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed
 }
 
 // toInt64 把脚本返回的任意数值类型转换为 int64。

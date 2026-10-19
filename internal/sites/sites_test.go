@@ -144,6 +144,37 @@ func TestSiteParamsArePreserved(t *testing.T) {
 	}
 }
 
+// TestSitePolicyFieldsArePreserved 覆盖：站点级链路引用、IP 名单与访问动作完整映射。
+func TestSitePolicyFieldsArePreserved(t *testing.T) {
+	resolver := buildResolver(t, config.SiteConfig{
+		Name:         "policy",
+		Hosts:        []string{"policy.example.com"},
+		Pipeline:     "strict_chain",
+		Allowlist:    []string{"10.0.0.0/8"},
+		Blocklist:    []string{"203.0.113.0/24"},
+		AccessAction: "observe",
+		AccessScore:  9,
+		Params:       map[string]string{"apisec.action": "observe"},
+	})
+
+	site := resolver.Resolve("policy.example.com")
+	if site.Pipeline != "strict_chain" {
+		t.Fatalf("pipeline 期望 strict_chain，实际 %q", site.Pipeline)
+	}
+	if len(site.Allowlist) != 1 || site.Allowlist[0] != "10.0.0.0/8" {
+		t.Fatalf("allowlist 未完整保留：%v", site.Allowlist)
+	}
+	if len(site.Blocklist) != 1 || site.Blocklist[0] != "203.0.113.0/24" {
+		t.Fatalf("blocklist 未完整保留：%v", site.Blocklist)
+	}
+	if site.AccessAction != "observe" || site.AccessScore != 9 {
+		t.Fatalf("站点访问动作未完整保留：%+v", site)
+	}
+	if got, ok := site.Param("apisec.action"); !ok || got != "observe" {
+		t.Fatalf("站点参数未完整保留：value=%q ok=%v", got, ok)
+	}
+}
+
 // TestNewValidation 覆盖：非法站点声明必须在构造阶段失败（fail fast）。
 func TestNewValidation(t *testing.T) {
 	cases := []struct {
@@ -198,6 +229,18 @@ func TestNewValidation(t *testing.T) {
 				{Name: "a", Hosts: []string{"dup.example.com"}},
 				{Name: "b", Hosts: []string{"dup.example.com"}},
 			},
+		},
+		{
+			name:     "非法访问动作",
+			declared: []config.SiteConfig{{Name: "a", Hosts: []string{"a.example.com"}, AccessAction: "deny"}},
+		},
+		{
+			name:     "非法白名单",
+			declared: []config.SiteConfig{{Name: "a", Hosts: []string{"a.example.com"}, Allowlist: []string{"not-a-cidr"}}},
+		},
+		{
+			name:     "非法黑名单",
+			declared: []config.SiteConfig{{Name: "a", Hosts: []string{"a.example.com"}, Blocklist: []string{"300.1.1.1/24"}}},
 		},
 	}
 

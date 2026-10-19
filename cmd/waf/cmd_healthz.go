@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/weiyongkang/waf/internal/config"
 )
 
 // healthzProbeTimeout 是本地存活探测的超时时间。
@@ -16,7 +18,7 @@ import (
 // 超过该时长说明进程已经无法正常服务，应当判定为不健康。
 const healthzProbeTimeout = 2 * time.Second
 
-// runHealthz 实现 healthz 子命令：探测本地 /healthz 端点。
+// runHealthz 实现 healthz 子命令：探测本地健康检查端点（自动叠加 server.base_path）。
 //
 // 用途：容器 HEALTHCHECK 直接调用 `waf healthz`（不依赖镜像内是否安装 curl/wget），
 // 这也是 distroless 镜像下唯一可行的健康检查方式。
@@ -27,7 +29,7 @@ func runHealthz(args []string, stdout, stderr io.Writer) int {
 	}
 
 	target := probeAddress(resolved.Config.Server.Listen)
-	url := "http://" + target + "/healthz"
+	url := "http://" + target + config.JoinBasePath(resolved.Config.Server.BasePath, "/healthz")
 
 	client := &http.Client{Timeout: healthzProbeTimeout}
 	resp, err := client.Get(url)

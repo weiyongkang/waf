@@ -81,19 +81,19 @@
 | 扫描器 / 爬虫识别 | 指纹库 + 行为特征 | P1 |
 | 会话固定 / 会话劫持 | CRS 943 系列 | P2 |
 | 数据泄露（响应侧） | SQL/Java/PHP/IIS 错误页、WebShell 回显 | P1 |
-| 漏洞虚拟补丁 | 针对具体 CVE 的定向规则 | P1 |
+| 漏洞虚拟补丁 | 针对具体 CVE 的定向规则 | ✅ `engine.virtual_patches` / `virtual_patch_files`：内置 CVE 模板 + 自定义 SecLang | P1 |
 | XXE / SSRF / SSTI / 反序列化 | 部分由 CRS 覆盖，其余需自定义规则 | P1 |
 ### 2.4 访问控制与反自动化
 
 | 功能域 | 市场常见做法 | 本方案支撑 | 优先级 |
 | --- | --- | --- | --- |
 | IP 黑白名单 | IP / CIDR 集合、批量导入 | ✅ `@ipMatch` + 自研名单管理；🛠 持久化与导入 | P0 |
-| 地域封禁 | GeoIP 定位、国家级拦截 | 🔌 `coraza-geoip` 插件（本地 MaxMind MMDB，完全离线可用）+ `@geoLookup` / `GEO` 变量 | P1 |
-| IP 信誉库 | 云威胁情报 | ⚠️ 本地 IP/CIDR 情报库 + 内网 DNSBL（`@rbl` 走 DNS，离线必须指向内网服务或停用） | P1 |
+| 地域封禁 | GeoIP 定位、国家级拦截 | ✅ 自研 `geoip` 插件：本地 MaxMind Country/City MMDB、国家/洲 allow/block、原子热更新 | P1 |
+| IP 信誉库 | 云威胁情报 | ✅ 本地威胁情报（IP/CIDR、ASN、精确域名、`*.suffix`）+ 文件/目录指纹热更新；不访问云端 API | P1 |
 | 速率限制 / CC 防护 | 按 IP/URL/Header 维度的频次与并发控制 | 🛠 复用 `reference/honeypot/internal/ratelimit`，扩展为多维度令牌桶 | P0 |
 | 暴力破解防护 | 登录接口频次、失败计数、锁定 | 🛠 基于 `TX` 变量 + 本地计数（注意 Coraza `initcol` 为内存态） | P0 |
-| 人机校验 / 反 Bot | CAPTCHA、JS 挑战、无感挑战 | ⚠️ 无云端 Bot 指纹库；🛠 本地挑战页 + UA/IP/行为启发式 | P2 |
-| 访问认证挑战 | 站点级口令（预发/内网保护） | 🛠 Basic Auth / Cookie 挑战 | P2 |
+| 人机校验 / 反 Bot | CAPTCHA、JS 挑战、无感挑战 | ⚠️ 无云端 Bot 指纹库；当前实现 Basic + HMAC Cookie 站点口令，不含 CAPTCHA / JS 挑战 | P2 |
+| 访问认证挑战 | 站点级口令（预发/内网保护） | ✅ `challenge` 插件：Basic / cookie / basic_or_cookie，HMAC-SHA256 无状态签名 | P2 |
 | 封禁联动 | 自动封禁 IP、与防火墙联动 | 🛠 复用 `reference/honeypot/internal/firewall`（iptables / firewalld / ufw）+ 定时解封 | P0 |
 | 限速与封禁的可观测 | 封禁列表、解封、误封申诉 | 🛠 管理面提供 | P1 |
 
@@ -102,6 +102,7 @@
 | 功能域 | 市场常见做法 | 本方案支撑 | 优先级 |
 | --- | --- | --- | --- |
 | 自定义拦截页 | 403 页面 / 自定义响应体 | ✅ `deny,status:` / `redirect` / `block`；🛠 品牌化错误页 | P0 |
+| 蜜罐 / 诱饵端点 | 伪造漏洞页面、扫描器欺骗 | ✅ `pipeline[type=honeypot]`：规则化路径匹配 + 自定义状态码/响应头/正文；Traefik / Nginx / OpenResty 统一经 `/waf/deny` 回源渲染 | P1 |
 | 敏感信息脱敏 | 响应体过滤、掩码 | ✅ `SecResponseBodyAccess` + 自定义规则；🛠 脱敏算子 | P2 |
 | 防爬虫动态防护 | HTML/JS 动态加密（SafeLine Dynamic Protection） | 🛠 需自研（离线可做，但成本高） | P2 |
 | 恶意文件查杀 | 上传文件病毒扫描 | 🔌 CRS `antivirus` 插件（对接本地 ClamAV，离线可用） | P1 |
@@ -125,10 +126,10 @@
 | 功能域 | 市场常见做法 | 本方案支撑 | 优先级 |
 | --- | --- | --- | --- |
 | 接入形态 | 反向代理 / 旁路 / 插件 | 🛠 反向代理（推荐）/ forward-auth / Go 中间件库 / HAProxy SPOE | P0 |
-| 多站点 / 多域名 | 按域名绑定策略 | 🛠 站点级策略路由 | P1 |
+| 多站点 / 多域名 | 按域名绑定策略 | ✅ `sites[]` + `pipelines[]`：站点级校验链、`engine_mode`、IP 名单与参数覆盖 | P1 |
 | TLS 卸载与证书 | 证书管理、SNI | 🛠 支持 PEM 载入 + 内网 CA；⚠️ 无 ACME（离线） | P0 |
 | 配置管理 | 控制台可视化配置 | 🛠 本地 Web UI + 配置文件双通道 | P0 |
-| 配置热加载 | 改配置不重启 | ✅ 规则热加载；🛠 业务配置热加载 | P0 |
+| 配置热加载 | 改配置不重启 | ✅ 规则热加载；✅ 目录模式业务配置热加载（pipeline/sites/ban/responder/engine） | P0 |
 | 高可用 | 双机热备、集群 | 🛠 无状态化 + Keepalived/VIP 或前置 LB | P1 |
 | 水平扩展 | 多实例共享策略 | 🛠 配置文件分发或只读共享存储 | P2 |
 | 用户与权限 | RBAC、多租户 | 🛠 本地账号 + RBAC（可对接内网 LDAP/AD） | P1 |
@@ -159,11 +160,23 @@
 
 ## 4. 功能列表（按交付阶段）
 
+> 本节保留最初的**目标分级基线**。当前代码实现状态见下表；未列出的条目不改变原始排期。
+
+| 能力 | 当前状态 | 说明 |
+| --- | --- | --- |
+| 多站点策略 | ✅ 已完成 | 具名校验链、站点 IP 黑白名单、站点级 `engine_mode` / 参数覆盖 |
+| GeoIP 地域控制 | ✅ 已完成 | 本地 Country/City MMDB，国家/洲 allow/block，失败保留旧快照 |
+| 本地威胁情报 | ✅ 已完成 | IP/CIDR、ASN、精确域名与 `*.suffix`，文件/目录扫描与定时刷新 |
+| 虚拟补丁 | ✅ 已完成 | 4 个内置 CVE 模板 + 自定义 `.conf` 补丁 |
+| 本地人机校验 / 站点口令 | ✅ 基础版 | Basic、HMAC Cookie、`basic_or_cookie`；不含 CAPTCHA / JS 无感挑战 |
+| API Schema 校验 | ✅ 基础版 | OpenAPI 3.x 请求侧，参数 + JSON 请求体；不含接口发现与响应侧校验 |
+
 ### P0 — MVP（可用、能扛住真实流量、可运维）
 
 1. **接入层**：HTTP/HTTPS 反向代理，支持 TLS（PEM/内网 CA）、Host/路径路由、WebSocket/SSE 透传、请求体限额与超时控制。
 2. **检测引擎**：Coraza v3 + OWASP CRS v4，异常评分模式，Paranoia Level 可配（默认 PL1）。
-3. **规则管理**：`Include` 目录化加载、确定性加载顺序、`SecRuleEngine On/DetectionOnly` 全局与站点级切换、规则热加载（`fsnotify` + 引擎原子替换，加载失败保留旧引擎）。
+3. **规则管理**：`Include` 目录化加载、确定性加载顺序、`SecRuleEngine On/DetectionOnly` 全局与站点级切换、
+   CRS 与蜜罐规则目录轮询热加载（可配置 `poll_interval`，原子替换，加载失败保留旧规则）。
 4. **旁路/观察模式**：先用 DetectionOnly 跑一段时间，输出「若拦截」清单，用于压误报。
 5. **访问控制**：IP/CIDR 黑白名单（`@ipMatch`）、方法/路径白名单、UA 白名单。
 6. **限速与 CC**：按 IP、按 IP+URL 的滑动窗口/令牌桶限速；登录接口失败计数与临时锁定。

@@ -50,6 +50,8 @@ type counterItem struct {
 type banItem struct {
 	// reason 是封禁原因（写入名单值，便于运维排查）。
 	reason string
+	// bannedAt 是首次封禁时间。
+	bannedAt time.Time
 	// expireAt 是封禁到期时间；零值表示永不过期。
 	expireAt time.Time
 }
@@ -208,10 +210,26 @@ func (s *MemoryStore) Incr(_ context.Context, key string, window time.Duration) 
 	return 1, window, nil
 }
 
-// Ban 把 key 加入封禁名单（core.Store 实现）。
+// Ban 把 key 加入封禁名单，已存在时强制覆盖（core.Store 实现）。
 func (s *MemoryStore) Ban(_ context.Context, key string, ttl time.Duration, reason string) error {
+	now := s.clock.Now()
+	_, err := s.putBan(key, reason, now, expiryFrom(now, ttl), false)
+	return err
+}
+
+// BanIfAbsent 仅在 key 不存在或已过期时写入封禁记录（core.Store 实现）。
+func (s *MemoryStore) BanIfAbsent(_ context.Context, key string, ttl time.Duration, reason string) (bool, error) {
+	now := s.clock.Now()
+	return s.putBan(key, reason, now, expiryFrom(now, ttl), true)
+}
+
+// putBan 是封禁写入的唯一内部入口，保证 TTL 与容量统计逻辑只有一份实现。
+//
+// onlyIfAbsent=true 时，若记录仍有效则不做任何修改并返回 created=false；
+// 已过期记录会先移除再按新时间写入，因此「到期后再次封禁」仍能获得完整 TTL。
+func (s *MemoryStore) putBan(key, reason string, bannedAt, expireAt time.Time, onlyIfAbsent bool) (bool, error) {
 	if s.closed.Load() {
-		return ErrStoreClosed
+		return false, ErrStoreClosed
 	}
 
 	fullKey := s.prefix + key
@@ -220,13 +238,26 @@ func (s *MemoryStore) Ban(_ context.Context, key string, ttl time.Duration, reas
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
 
-	if _, exists := shard.bans[fullKey]; !exists {
-		if err := s.reserveBan(); err != nil {
-			return err
+	now := s.clock.Now()
+	existing, exists := shard.bans[fullKey]
+	if exists {
+		active := existing.expireAt.IsZero() || existing.expireAt.After(now)
+		if onlyIfAbsent && active {
+			return false, nil
+		}
+		if !active {
+			delete(shard.bans, fullKey)
+			s.totalBans.Add(-1)
+			exists = false
 		}
 	}
-	shard.bans[fullKey] = &banItem{reason: reason, expireAt: expiryFrom(s.clock.Now(), ttl)}
-	return nil
+	if !exists {
+		if err := s.reserveBan(); err != nil {
+			return false, err
+		}
+	}
+	shard.bans[fullKey] = &banItem{reason: reason, bannedAt: bannedAt, expireAt: expireAt}
+	return true, nil
 }
 
 // IsBanned 查询封禁状态与剩余时长（core.Store 实现）。
@@ -272,9 +303,11 @@ func (s *MemoryStore) List(_ context.Context) ([]core.BanEntry, error) {
 				continue
 			}
 			entries = append(entries, core.BanEntry{
-				Key:    trimPrefix(fullKey, s.prefix),
-				Reason: item.reason,
-				TTL:    remainingFrom(now, item.expireAt),
+				Key:      trimPrefix(fullKey, s.prefix),
+				Reason:   item.reason,
+				TTL:      remainingFrom(now, item.expireAt),
+				BannedAt: item.bannedAt,
+				ExpireAt: item.expireAt,
 			})
 		}
 		shard.mu.Unlock()

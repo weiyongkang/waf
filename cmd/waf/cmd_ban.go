@@ -110,12 +110,26 @@ func runBanList(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "共 %d 条封禁记录（存储实例：%s；主封禁维度：%s；查询维度：%s）\n",
 		len(entries), strings.Join(stack.stores.Names(), ","), stack.bans.KeyKind(),
 		strings.Join(stack.bans.Scopes(), ","))
-	fmt.Fprintf(stdout, "%-48s %-12s %s\n", "封禁键", "剩余时长", "原因")
+	fmt.Fprintf(stdout, "%-44s %-12s %-20s %-22s %-36s %s\n",
+		"封禁键", "剩余时长", "封禁维度", "检测目标", "触发URI", "规则 / 原因")
 	for _, entry := range entries {
-		fmt.Fprintf(stdout, "%-48s %-12s %s\n",
-			entry.Key, formatRemaining(entry.TTL), entry.Reason)
+		rule := entry.RuleID
+		if rule == "" {
+			rule = "-"
+		}
+		fmt.Fprintf(stdout, "%-44s %-12s %-20s %-22s %-36s %s / %s\n",
+			entry.Key, formatRemaining(entry.TTL), valueOrDash(entry.Scope),
+			valueOrDash(entry.Target), valueOrDash(entry.URI), rule, entry.Reason)
 	}
 	return exitOK
+}
+
+// valueOrDash 用于封禁列表输出，避免空字段导致列错位。
+func valueOrDash(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "-"
+	}
+	return value
 }
 
 // runBanAdd 新增一条封禁记录。

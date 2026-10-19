@@ -152,7 +152,7 @@ func (c *Check) Evaluate(rctx *core.RequestContext) (*core.Result, error) {
 			c.name, "ip_allowlist", "客户端 IP 命中白名单，跳过后续检测",
 			core.SeverityInfo, 0,
 		))
-		result.Findings[0].Data = map[string]string{"client_ip": clientIP}
+		result.Findings[0].Data = map[string]string{"target": "client_ip", "client_ip": clientIP}
 		return result, nil
 	}
 
@@ -165,7 +165,7 @@ func (c *Check) Evaluate(rctx *core.RequestContext) (*core.Result, error) {
 			c.name, "ip_blocklist", "客户端 IP 命中黑名单",
 			core.SeverityHigh, c.score,
 		))
-		result.Findings[0].Data = map[string]string{"client_ip": clientIP}
+		result.Findings[0].Data = map[string]string{"target": "client_ip", "client_ip": clientIP}
 		return result, nil
 	}
 

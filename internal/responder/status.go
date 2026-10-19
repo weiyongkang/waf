@@ -23,6 +23,8 @@ func CodeForStatus(status int) string {
 		return config.CodeBadRequest
 	case http.StatusServiceUnavailable:
 		return config.CodeUnavailable
+	case http.StatusNotFound:
+		return config.CodeNotFound
 	default:
 		return config.CodeBlocked
 	}
@@ -67,6 +69,8 @@ func StatusForCode(code string) int {
 		return http.StatusBadRequest
 	case config.CodeUnavailable:
 		return http.StatusServiceUnavailable
+	case config.CodeNotFound:
+		return http.StatusNotFound
 	case config.CodeBlocked:
 		return http.StatusForbidden
 	default:
@@ -88,6 +92,8 @@ func CodeForVerdict(verdict core.Verdict) string {
 		return config.CodeBadRequest
 	case core.VerdictUnavailable:
 		return config.CodeUnavailable
+	case core.VerdictHoneypot:
+		return config.CodeHoneypot
 	default:
 		// VerdictBlock / VerdictDrop / VerdictChallenge 统一按「被安全策略拦截」表达。
 		return config.CodeBlocked
