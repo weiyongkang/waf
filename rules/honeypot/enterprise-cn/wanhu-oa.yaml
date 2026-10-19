@@ -1,0 +1,9 @@
+# 万户网络 OA 办公系统
+- method: GET
+  path: "/wanhu/"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "nginx"
+  body: |
+    <!DOCTYPE html><html lang=zh-CN><head><meta charset=utf-8><title>万户OA</title><style>body{font-family:"Microsoft YaHei",sans-serif;background:#f5f0eb;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#fff;padding:36px;border:1px solid #e0d5c5;width:340px}.login-box .logo{text-align:center;color:#8b4513;font-size:22px;font-weight:bold;margin-bottom:24px}.login-box input{width:100%;padding:10px;margin-bottom:12px;border:1px solid #d0c0a0;border-radius:3px;box-sizing:border-box}.login-box button{width:100%;padding:10px;background:#8b4513;color:#fff;border:none;border-radius:3px;cursor:pointer}</style></head><body><div class=login-box><div class=logo>万户OA</div><form method=POST action=/wanhu/login><input type=text name=username placeholder=用户名><input type=password name=password placeholder=密码><button type=submit>登 录</button></form></div></body></html>

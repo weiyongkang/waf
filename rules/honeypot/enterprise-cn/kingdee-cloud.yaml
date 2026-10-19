@@ -1,0 +1,9 @@
+# 金蝶云星空 Cloud ERP
+- method: GET
+  path: "/k3cloud/"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "nginx"
+  body: |
+    <!DOCTYPE html><html lang=zh-CN><head><meta charset=utf-8><title>金蝶云星空</title><style>body{font-family:"Microsoft YaHei",sans-serif;background:linear-gradient(180deg,#1890ff 0,#096dd9 100%);display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#fff;padding:44px;width:360px;border-radius:8px}.login-box h2{text-align:center;color:#1890ff;font-size:22px;margin-bottom:28px}.login-box input{width:100%;padding:10px;margin-bottom:14px;border:1px solid #e8e8e8;border-radius:4px;box-sizing:border-box}.login-box button{width:100%;padding:10px;background:#1890ff;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:15px}</style></head><body><div class=login-box><h2>金蝶云·星空</h2><form method=POST action=/k3cloud/login><input type=text name=username placeholder=用户名><input type=password name=password placeholder=密码><button type=submit>登 录</button></form></div></body></html>

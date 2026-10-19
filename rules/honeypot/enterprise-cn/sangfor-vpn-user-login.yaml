@@ -1,0 +1,11 @@
+# 深信服 SSL VPN 登录页
+- method: GET
+  path: "/vpn/user/login"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "Sangfor-Engine/7.6.8"
+  body: |
+    <!DOCTYPE html><html lang=zh-CN><head><meta charset=utf-8><title>SSLVPN</title>
+    <style>body{font-family:"Microsoft YaHei",sans-serif;background:#f2f6fa;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#fff;padding:40px;border-radius:6px;width:360px;box-shadow:0 4px 16px rgba(0,0,0,.08)}.login-box .logo{text-align:center;color:#00a0e9;font-size:22px;font-weight:bold;margin-bottom:24px}.login-box input{width:100%;padding:10px;margin-bottom:14px;border:1px solid #d0d0d0;border-radius:3px;box-sizing:border-box}.login-box button{width:100%;padding:10px;background:#00a0e9;color:#fff;border:none;border-radius:3px;cursor:pointer}</style></head>
+    <body><div class=login-box><div class=logo>深信服 SSL VPN</div><form method=POST action=/vpn/login><input type=text name=username placeholder=用户名><input type=password name=password placeholder=密码><button type=submit>登 录</button></form></div></body></html>

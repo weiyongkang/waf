@@ -1,0 +1,20 @@
+# Spring Boot Actuator 端点
+- method: GET
+  path: /actuator
+  status: 200
+  content-type: application/json
+  headers:
+    Server: nginx/1.25.3
+  body: "{\n  \"_links\": {\n    \"self\": { \"href\": \"http://localhost:8080/actuator\"\
+    , \"templated\": false },\n    \"health\": { \"href\": \"http://localhost:8080/actuator/health\"\
+    , \"templated\": false },\n    \"health-path\": { \"href\": \"http://localhost:8080/actuator/health/{*path}\"\
+    , \"templated\": true },\n    \"info\": { \"href\": \"http://localhost:8080/actuator/info\"\
+    , \"templated\": false },\n    \"metrics\": { \"href\": \"http://localhost:8080/actuator/metrics\"\
+    , \"templated\": false },\n    \"env\": { \"href\": \"http://localhost:8080/actuator/env\"\
+    , \"templated\": false },\n    \"beans\": { \"href\": \"http://localhost:8080/actuator/beans\"\
+    , \"templated\": false },\n    \"mappings\": { \"href\": \"http://localhost:8080/actuator/mappings\"\
+    , \"templated\": false },\n    \"configprops\": { \"href\": \"http://localhost:8080/actuator/configprops\"\
+    , \"templated\": false },\n    \"loggers\": { \"href\": \"http://localhost:8080/actuator/loggers\"\
+    , \"templated\": false },\n    \"heapdump\": { \"href\": \"http://localhost:8080/actuator/heapdump\"\
+    , \"templated\": false },\n    \"threaddump\": { \"href\": \"http://localhost:8080/actuator/threaddump\"\
+    , \"templated\": false }\n  }\n}\n"

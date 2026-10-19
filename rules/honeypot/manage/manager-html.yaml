@@ -1,0 +1,14 @@
+# 中间件管理控制台登录页面
+- method: GET
+  path: /manager/html
+  status: 401
+  content-type: text/html
+  headers:
+    Server: Apache-Coyote/1.1
+    WWW-Authenticate: Basic realm="Tomcat Manager Application"
+  body: "<!DOCTYPE html>\n<html>\n<head>\n    <title>401 Unauthorized</title>\n  \
+    \  <style>\n        body { font-family: Arial, sans-serif; background: #fff; color:\
+    \ #333; margin: 40px; }\n        h1 { color: #c00; font-size: 24px; }\n      \
+    \  p { font-size: 14px; }\n    </style>\n</head>\n<body>\n    <h1>401 Unauthorized</h1>\n\
+    \    <p>You are not authorized to view this page. Please provide valid credentials.</p>\n\
+    </body>\n</html>\n"

@@ -1,0 +1,9 @@
+# H3C iMC 智能管理中心
+- method: GET
+  path: "/imc/"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "Apache-Coyote/1.1"
+  body: |
+    <!DOCTYPE html><html lang=zh-CN><head><meta charset=utf-8><title>H3C iMC</title><style>body{font-family:"Microsoft YaHei",sans-serif;background:#f2f5f8;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#fff;padding:40px;width:340px;border:1px solid #dde;border-radius:4px}.login-box .logo{text-align:center;color:#0066b3;font-size:18px;font-weight:bold;margin-bottom:24px}.login-box input{width:100%;padding:10px;margin-bottom:14px;border:1px solid #ccc;border-radius:3px;box-sizing:border-box}.login-box button{width:100%;padding:10px;background:#0066b3;color:#fff;border:none;border-radius:3px;cursor:pointer}</style></head><body><div class=login-box><div class=logo>H3C iMC 智能管理中心</div><form method=POST action=/imc/login><input type=text name=loginName placeholder=用户名><input type=password name=loginPassword placeholder=密码><button type=submit>登 录</button></form></div></body></html>

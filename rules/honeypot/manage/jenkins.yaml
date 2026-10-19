@@ -1,0 +1,31 @@
+- method: GET
+  path: /jenkins
+  status: 200
+  content-type: text/html
+  headers:
+    Server: nginx
+    X-Jenkins: '2.452'
+  body: "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"utf-8\"\
+    >\n    <title>Jenkins</title>\n    <style>\n        body { font-family: 'Helvetica\
+    \ Neue', Arial, sans-serif; background: #f6f6f6; display: flex; justify-content:\
+    \ center; align-items: center; height: 100vh; margin: 0; }\n        .login-box\
+    \ { background: #fff; padding: 40px; border-radius: 4px; border: 1px solid #ddd;\
+    \ width: 320px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }\n        .login-box\
+    \ .logo { text-align: center; margin-bottom: 28px; }\n        .login-box .logo\
+    \ img { height: 40px; }\n        .login-box h1 { text-align: center; font-size:\
+    \ 18px; color: #333; font-weight: 400; margin-bottom: 24px; }\n        .login-box\
+    \ input { width: 100%; padding: 10px; margin-bottom: 14px; border: 1px solid #ccc;\
+    \ border-radius: 3px; box-sizing: border-box; font-size: 14px; }\n        .login-box\
+    \ button { width: 100%; padding: 10px; background: #1d6fa5; color: #fff; border:\
+    \ none; border-radius: 3px; cursor: pointer; font-size: 15px; }\n        .login-box\
+    \ button:hover { background: #155a87; }\n    </style>\n</head>\n<body>\n    <div\
+    \ class=\"login-box\">\n        <div class=\"logo\">\n            <svg width=\"\
+    120\" height=\"40\" viewBox=\"0 0 120 40\">\n                <rect width=\"120\"\
+    \ height=\"40\" fill=\"#d24939\"/>\n                <text x=\"60\" y=\"26\" text-anchor=\"\
+    middle\" fill=\"#fff\" font-size=\"16\" font-weight=\"bold\">Jenkins</text>\n\
+    \            </svg>\n        </div>\n        <h1>Sign in to Jenkins</h1>\n   \
+    \     <form method=\"POST\" action=\"/jenkins/j_spring_security_check\">\n   \
+    \         <input type=\"text\" name=\"j_username\" placeholder=\"Username\">\n\
+    \            <input type=\"password\" name=\"j_password\" placeholder=\"Password\"\
+    >\n            <button type=\"submit\">Sign in</button>\n        </form>\n   \
+    \ </div>\n</body>\n</html>\n"

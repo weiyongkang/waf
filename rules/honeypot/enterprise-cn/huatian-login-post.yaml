@@ -1,0 +1,10 @@
+# 华天动力 Huatian OA 登录接口
+- method: POST
+  path: "/oa/login.jsp"
+  status: 302
+  content-type: text/html
+  headers:
+    Server: "Apache/2.4.57"
+    Location: "/oa/main.jsp"
+  body: |
+    <!DOCTYPE html><html><head><meta http-equiv=refresh content="0;url=/oa/main.jsp"></head><body></body></html>

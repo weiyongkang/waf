@@ -1,0 +1,9 @@
+# 帆软 ReportServer 报表服务
+- method: GET
+  path: "/ReportServer"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "Apache/2.4.57"
+  body: |
+    <!DOCTYPE html><html lang=zh-CN><head><meta charset=utf-8><title>ReportServer</title><style>body{font-family:"Microsoft YaHei",sans-serif;background:#eef1f6;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#fff;padding:32px;border:1px solid #ddd;width:320px;text-align:center}.login-box h3{color:#1e6fff;margin-bottom:20px}.login-box input{width:100%;padding:8px;margin-bottom:10px;border:1px solid #ccc;box-sizing:border-box}.login-box button{width:100%;padding:8px;background:#1e6fff;color:#fff;border:none;cursor:pointer}</style></head><body><div class=login-box><h3>ReportServer</h3><form method=POST action=/ReportServer/login><input type=text name=username placeholder=用户名><input type=password name=password placeholder=密码><button type=submit>登 录</button></form></div></body></html>

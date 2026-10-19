@@ -1,0 +1,9 @@
+# Laravel Debugbar 调试信息泄露
+- method: GET
+  path: "/_debugbar/open"
+  status: 200
+  content-type: application/json
+  headers:
+    Server: "nginx"
+  body: |
+    {"id":"a1b2c3","datetime":"2025-06-15 14:32:18","utime":1718620338.421,"method":"GET","uri":"/home","ip":"192.168.1.100","nb_statements":142,"nb_excluded_statements":0,"nb_failed_statements":0,"accumulated_duration":0.238,"memory_usage":18874368,"memory_peak":24117248,"nb_requests":1}

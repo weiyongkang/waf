@@ -1,0 +1,12 @@
+# 通达 Tongda OA 登录页
+- method: GET
+  path: "/general/login_code.php"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "Apache/2.4.57"
+    X-Powered-By: "PHP/7.4.33"
+  body: |
+    <!DOCTYPE html><html lang=zh-CN><head><meta charset=utf-8><title>通达OA</title>
+    <style>body{font-family:"Microsoft YaHei",sans-serif;background:#f0f2f5;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#fff;padding:36px;border:1px solid #e0e0e0;width:340px;text-align:center}.login-box .logo{color:#409eff;font-size:22px;font-weight:bold;margin-bottom:24px}.login-box input{width:100%;padding:10px;margin-bottom:12px;border:1px solid #d0d0d0;border-radius:3px;box-sizing:border-box}.login-box button{width:100%;padding:10px;background:#409eff;color:#fff;border:none;border-radius:3px;cursor:pointer}.login-box .code{display:flex;gap:10px}.login-box .code input{flex:1}</style></head>
+    <body><div class=login-box><div class=logo>通达OA</div><form method=POST action=/general/login_code.php><input type=text name=UID placeholder=用户名><input type=password name=PASS placeholder=密码><button type=submit>登 录</button></form></div></body></html>

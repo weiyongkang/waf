@@ -1,0 +1,10 @@
+# phpinfo() 常见别名
+- method: GET
+  path: "/info.php"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "Apache/2.4.57"
+    X-Powered-By: "PHP/8.1.27"
+  body: |
+    <!DOCTYPE html><html><head><title>phpinfo()</title><style>body{font-family:sans-serif;font-size:12px}h1{color:#4F5B93}h2{color:#4F5B93}.e{background:#ccf}.v{background:#ddd}td{padding:4px}</style></head><body><h1>PHP Version 8.1.27</h1><table><tr><td class=e>System</td><td class=v>Linux webserver</td></tr><tr><td class=e>Server API</td><td class=v>Apache 2.0 Handler</td></tr><tr><td class=e>Loaded Extensions</td><td class=v>Core, date, libxml, openssl, pcre, zlib, filter, hash, json, mbstring, mysqli, PDO, pdo_mysql, session, tokenizer, xml</td></tr></table></body></html>

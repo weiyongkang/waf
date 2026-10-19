@@ -1,0 +1,10 @@
+# 帆软 FineReport 登录接口
+- method: POST
+  path: "/webroot/decision/login"
+  status: 200
+  content-type: application/json
+  headers:
+    Server: "nginx"
+    Content-Type: "application/json;charset=UTF-8"
+  body: |
+    {"data":{"token":"fine_auth_token_abc123","userName":"admin","displayName":"系统管理员","roleNames":["超级管理员"]},"errorCode":"0"}

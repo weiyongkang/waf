@@ -1,0 +1,10 @@
+- method: GET
+  path: /v1/kv
+  status: 200
+  content-type: application/json
+  headers:
+    Server: nginx
+  body: "[\n  \"config/\",\n  \"config/database/\",\n  \"config/database/host\",\n\
+    \  \"config/database/port\",\n  \"config/database/name\",\n  \"config/redis/\"\
+    ,\n  \"config/redis/host\",\n  \"service/\",\n  \"service/api-gateway/\",\n  \"\
+    service/user-service/\"\n]\n"

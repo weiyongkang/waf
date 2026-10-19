@@ -1,0 +1,10 @@
+# ThinkPHP 框架调试信息泄露
+- method: GET
+  path: "/index.php?s=index/think\\container/invokefunction"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "nginx"
+    X-Powered-By: "ThinkPHP"
+  body: |
+    <!DOCTYPE html><html><head><meta charset=utf-8><title>ThinkPHP</title><style>body{font-family:sans-serif;padding:20px}.trace{padding:10px;margin:10px 0;background:#f5deb3;border:1px solid #deb887;font-family:monospace;font-size:13px}.info{color:#666}</style></head><body><h1>ThinkPHP 6.1.0</h1><div class=trace>$_SERVER = Array ( [HTTP_HOST] => localhost [REQUEST_URI] => /index.php [SCRIPT_FILENAME] => /var/www/html/public/index.php [DOCUMENT_ROOT] => /var/www/html/public )</div><div class=info>Controller: app\controller\Index · Action: index · URL: /</div></body></html>

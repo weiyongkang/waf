@@ -1,0 +1,9 @@
+# Sonatype Nexus Repository 登录页
+- method: GET
+  path: "/nexus"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "Jetty(9.4.53)"
+  body: |
+    <!DOCTYPE html><html lang=en><head><meta charset=utf-8><title>Nexus Repository Manager</title><style>body{font-family:sans-serif;background:#f1f2f6;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#fff;padding:40px;width:360px;box-shadow:0 2px 12px rgba(0,0,0,.06)}.login-box .logo{text-align:center;color:#0a8043;font-size:22px;font-weight:bold;margin-bottom:28px}.login-box input{width:100%;padding:10px;margin-bottom:14px;border:1px solid #dcdde1;border-radius:3px;box-sizing:border-box}.login-box button{width:100%;padding:10px;background:#0a8043;color:#fff;border:none;border-radius:3px;cursor:pointer}</style></head><body><div class=login-box><div class=logo>NEXUS REPOSITORY</div><form method=POST action=/nexus/service/local/login><input type=text name=username placeholder=Username><input type=password name=password placeholder=Password><button type=submit>Sign In</button></form></div></body></html>

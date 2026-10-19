@@ -1,0 +1,22 @@
+- method: GET
+  path: /nacos
+  status: 200
+  content-type: text/html
+  headers:
+    Server: nginx
+  body: "<!DOCTYPE html>\n<html>\n<head>\n    <title>Nacos</title>\n    <style>\n\
+    \        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background:\
+    \ #f5f7fa; display: flex; justify-content: center; align-items: center; height:\
+    \ 100vh; margin: 0; }\n        .login-box { background: #fff; padding: 40px; border-radius:\
+    \ 4px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); width: 360px; }\n        .login-box\
+    \ .logo { text-align: center; font-size: 24px; color: #1c7ed9; font-weight: bold;\
+    \ margin-bottom: 28px; }\n        .login-box input { width: 100%; padding: 10px\
+    \ 12px; margin-bottom: 14px; border: 1px solid #dcdfe6; border-radius: 3px; box-sizing:\
+    \ border-box; font-size: 14px; }\n        .login-box button { width: 100%; padding:\
+    \ 10px; background: #1c7ed9; color: #fff; border: none; border-radius: 3px; cursor:\
+    \ pointer; font-size: 15px; }\n    </style>\n</head>\n<body>\n    <div class=\"\
+    login-box\">\n        <div class=\"logo\">NACOS</div>\n        <form method=\"\
+    POST\" action=\"/nacos/v1/auth/login\">\n            <input type=\"text\" name=\"\
+    username\" placeholder=\"Username\">\n            <input type=\"password\" name=\"\
+    password\" placeholder=\"Password\">\n            <button type=\"submit\">Sign\
+    \ In</button>\n        </form>\n    </div>\n</body>\n</html>\n"

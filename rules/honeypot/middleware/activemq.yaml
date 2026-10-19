@@ -1,0 +1,23 @@
+- method: GET
+  path: /activemq
+  status: 200
+  content-type: text/html
+  headers:
+    Server: Jetty(9.4.53)
+  body: "<!DOCTYPE html>\n<html>\n<head>\n    <title>ActiveMQ</title>\n    <style>\n\
+    \        body { font-family: Arial, sans-serif; background: #fff; margin: 30px;\
+    \ }\n        h1 { color: #d24726; font-size: 22px; border-bottom: 2px solid #d24726;\
+    \ padding-bottom: 8px; }\n        .nav { margin: 16px 0; }\n        .nav a { color:\
+    \ #d24726; text-decoration: none; margin-right: 20px; font-size: 14px; }\n   \
+    \     .nav a:hover { text-decoration: underline; }\n        table { border-collapse:\
+    \ collapse; width: 600px; margin-top: 16px; }\n        th { background: #f2f2f2;\
+    \ padding: 8px; text-align: left; border: 1px solid #ddd; font-size: 12px; }\n\
+    \        td { padding: 8px; border: 1px solid #ddd; font-size: 12px; }\n    </style>\n\
+    </head>\n<body>\n    <h1>ActiveMQ Console</h1>\n    <div class=\"nav\">\n    \
+    \    <a href=\"/activemq/queues.jsp\">Queues</a>\n        <a href=\"/activemq/topics.jsp\"\
+    >Topics</a>\n        <a href=\"/activemq/subscribers.jsp\">Subscribers</a>\n \
+    \       <a href=\"/activemq/connections.jsp\">Connections</a>\n    </div>\n  \
+    \  <h2>Broker</h2>\n    <table>\n    <tr><th>Name</th><td>localhost</td></tr>\n\
+    \    <tr><th>Version</th><td>5.18.3</td></tr>\n    <tr><th>ID</th><td>ID:host-52431-1718445869178-0:1</td></tr>\n\
+    \    <tr><th>Uptime</th><td>15 days 8 hours</td></tr>\n    <tr><th>Store</th><td>KahaDB\
+    \ (61 MB used)</td></tr>\n    </table>\n</body>\n</html>\n"

@@ -1,0 +1,19 @@
+- method: GET
+  path: /alertmanager
+  status: 200
+  content-type: text/html
+  headers:
+    Server: nginx
+  body: "<!DOCTYPE html>\n<html>\n<head>\n    <title>Alertmanager</title>\n    <style>\n\
+    \        body { font-family: 'Helvetica Neue', Arial, sans-serif; background:\
+    \ #fff; margin: 0; padding: 20px; }\n        .navbar { background: #4b2e83; padding:\
+    \ 10px 20px; color: #fff; font-size: 18px; font-weight: bold; margin: -20px -20px\
+    \ 20px -20px; }\n        table { border-collapse: collapse; width: 100%; font-size:\
+    \ 13px; }\n        th { background: #f8f8f8; padding: 8px; text-align: left; border-bottom:\
+    \ 2px solid #ddd; }\n        td { padding: 8px; border-bottom: 1px solid #eee;\
+    \ }\n        .badge { background: #4b2e83; color: #fff; padding: 2px 8px; border-radius:\
+    \ 3px; font-size: 11px; }\n    </style>\n</head>\n<body>\n    <div class=\"navbar\"\
+    >Alertmanager</div>\n    <h2>Silences</h2>\n    <table>\n    <tr><th>ID</th><th>Matchers</th><th>Starts</th><th>Ends</th><th>Creator</th></tr>\n\
+    \    <tr><td><span class=\"badge\">active</span> s1</td><td>alertname=InstanceDown</td><td>2025-06-15\
+    \ 12:30</td><td>2025-06-15 14:30</td><td>admin@localhost</td></tr>\n    </table>\n\
+    </body>\n</html>\n"

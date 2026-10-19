@@ -1,0 +1,15 @@
+- method: GET
+  path: /_nodes
+  status: 200
+  content-type: application/json
+  headers:
+    Server: nginx
+  body: "{\n  \"_nodes\": {\n    \"total\": 3,\n    \"successful\": 3,\n    \"failed\"\
+    : 0\n  },\n  \"cluster_name\": \"es-production\",\n  \"nodes\": {\n    \"node-1\"\
+    : {\n      \"name\": \"es-node-01\",\n      \"transport_address\": \"10.0.1.10:9300\"\
+    ,\n      \"host\": \"10.0.1.10\",\n      \"ip\": \"10.0.1.10\",\n      \"version\"\
+    : \"8.13.4\",\n      \"roles\": [\"master\", \"data\", \"ingest\"]\n    },\n \
+    \   \"node-2\": {\n      \"name\": \"es-node-02\",\n      \"transport_address\"\
+    : \"10.0.1.11:9300\",\n      \"host\": \"10.0.1.11\",\n      \"ip\": \"10.0.1.11\"\
+    ,\n      \"version\": \"8.13.4\",\n      \"roles\": [\"data\", \"ingest\"]\n \
+    \   }\n  }\n}\n"

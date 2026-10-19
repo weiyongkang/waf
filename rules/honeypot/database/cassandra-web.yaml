@@ -1,0 +1,13 @@
+# Cassandra Web 管理界面
+- method: GET
+  path: "/cassandra"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "nginx"
+  body: |
+    <!DOCTYPE html>
+    <html lang="en">
+    <head><meta charset="utf-8"><title>Cassandra Web</title>
+    <style>body{font-family:sans-serif;background:#1b1c20;color:#c4c9d4;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;flex-direction:column}.header{color:#5bbd72;font-size:22px;margin-bottom:24px}.connect-box{background:#2a2b30;padding:32px;border-radius:6px;width:340px}.connect-box input{width:100%;padding:10px;margin-bottom:14px;background:#1b1c20;border:1px solid #3e3f45;border-radius:3px;color:#c4c9d4;box-sizing:border-box}.connect-box button{width:100%;padding:10px;background:#5bbd72;color:#1b1c20;border:none;border-radius:3px;cursor:pointer;font-weight:600}</style></head>
+    <body><div class="header">Apache Cassandra</div><div class="connect-box"><form method="POST" action="/cassandra/connect"><input type="text" name="host" value="127.0.0.1:9042" placeholder="Host:Port"><input type="text" name="keyspace" placeholder="Keyspace"><input type="text" name="username" placeholder="Username"><input type="password" name="password" placeholder="Password"><button type="submit">Connect</button></form></div></body></html>

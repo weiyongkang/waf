@@ -1,0 +1,11 @@
+# 万户 Wanhu ezOFFICE 登录页
+- method: GET
+  path: "/defaultroot/login.jsp"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "Apache-Coyote/1.1"
+  body: |
+    <!DOCTYPE html><html lang=zh-CN><head><meta charset=utf-8><title>万户OA</title>
+    <style>body{font-family:"Microsoft YaHei",sans-serif;background:#f5f5f5;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#fff;padding:40px;border:1px solid #ddd;width:350px}.login-box .logo{text-align:center;color:#c41230;font-size:22px;font-weight:bold;margin-bottom:24px}.login-box input{width:100%;padding:10px;margin-bottom:12px;border:1px solid #ccc;box-sizing:border-box}.login-box button{width:100%;padding:10px;background:#c41230;color:#fff;border:none;cursor:pointer}</style></head>
+    <body><div class=login-box><div class=logo>万户网络 ezOFFICE</div><form method=POST action=/defaultroot/login.jsp><input type=text name=username placeholder=用户名><input type=password name=password placeholder=密码><button type=submit>登 录</button></form></div></body></html>

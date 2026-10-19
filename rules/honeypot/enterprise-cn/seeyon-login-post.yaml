@@ -1,0 +1,11 @@
+# 致远 Seeyon OA 登录接口
+- method: POST
+  path: "/seeyon/login.do"
+  status: 302
+  content-type: text/html
+  headers:
+    Server: "nginx"
+    Location: "/seeyon/main.do?method=main"
+    Set-Cookie: "JSESSIONID=seeyon_sess_abc456; Path=/seeyon"
+  body: |
+    <!DOCTYPE html><html><head><meta http-equiv=refresh content="0;url=/seeyon/main.do?method=main"></head><body></body></html>

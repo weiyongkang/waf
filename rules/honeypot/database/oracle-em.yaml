@@ -1,0 +1,13 @@
+# Oracle Enterprise Manager 控制台
+- method: GET
+  path: "/em"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "Oracle-Application-Server/12c"
+  body: |
+    <!DOCTYPE html>
+    <html lang="en">
+    <head><meta charset="utf-8"><title>Oracle Enterprise Manager</title>
+    <style>body{font-family:Arial;background:#fff;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#f9fafb;padding:40px;border:1px solid #d6dce2;width:360px}.login-box .oracle{text-align:center;color:#c74634;font-size:22px;font-weight:bold;margin-bottom:24px}.login-box input{width:100%;padding:8px;margin-bottom:12px;border:1px solid #bcc4cc;box-sizing:border-box;font-size:13px}.login-box button{width:100%;padding:8px;background:#2a5c8a;color:#fff;border:none;cursor:pointer}</style></head>
+    <body><div class="login-box"><div class="oracle">ORACLE Enterprise Manager</div><form method="POST" action="/em/login"><input type="text" name="username" placeholder="User Name"><input type="password" name="password" placeholder="Password"><button type="submit">Login</button></form></div></body></html>

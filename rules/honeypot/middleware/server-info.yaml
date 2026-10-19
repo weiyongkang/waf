@@ -1,0 +1,49 @@
+- method: GET
+  path: /server-info
+  status: 200
+  content-type: text/html
+  headers:
+    Server: Apache/2.4.57
+  body: '<!DOCTYPE html>
+
+    <html>
+
+    <head><title>Apache Server Information</title></head>
+
+    <body>
+
+    <h1>Apache Server Information</h1>
+
+    <h2>Module List</h2>
+
+    <ul>
+
+    <li>core_module (static)</li>
+
+    <li>http_module (static)</li>
+
+    <li>so_module (static)</li>
+
+    <li>mpm_prefork_module (shared)</li>
+
+    <li>authz_core_module (shared)</li>
+
+    <li>mod_php_module (shared)</li>
+
+    <li>mod_rewrite_module (shared)</li>
+
+    <li>mod_ssl_module (shared)</li>
+
+    <li>mod_proxy_module (shared)</li>
+
+    </ul>
+
+    <h2>Server Settings</h2>
+
+    <pre>Max Requests Per Child: 10000 - Keep Alive: on - Max Per Connection: 100</pre>
+
+    </body>
+
+    </html>
+
+    '

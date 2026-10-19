@@ -1,0 +1,9 @@
+# 致远 Seeyon OA 协同管理平台
+- method: GET
+  path: "/seeyon/"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "nginx"
+  body: |
+    <!DOCTYPE html><html lang=zh-CN><head><meta charset=utf-8><title>致远OA</title><style>body{font-family:"Microsoft YaHei",sans-serif;background:#e8edf5;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#fff;padding:40px;border:1px solid #dde;width:360px}.login-box .logo{text-align:center;color:#1a5cff;font-size:22px;font-weight:bold;margin-bottom:24px}.login-box input{width:100%;padding:10px;margin-bottom:14px;border:1px solid #ccd;border-radius:3px;box-sizing:border-box}.login-box button{width:100%;padding:10px;background:#1a5cff;color:#fff;border:none;border-radius:3px;cursor:pointer}</style></head><body><div class=login-box><div class=logo>致远互联</div><form method=POST action=/seeyon/main.do><input type=text name=username placeholder=用户名><input type=password name=password placeholder=密码><button type=submit>登 录</button></form></div></body></html>

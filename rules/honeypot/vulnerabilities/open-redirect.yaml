@@ -1,0 +1,10 @@
+# Open Redirect 漏洞探测
+- method: GET
+  path: "/redirect?url=https://evil.com"
+  status: 302
+  content-type: text/html
+  headers:
+    Server: "nginx"
+    Location: "https://evil.com"
+  body: |
+    <html><head><title>302 Found</title></head><body><p>Redirecting to <a href="https://evil.com">https://evil.com</a></p></body></html>

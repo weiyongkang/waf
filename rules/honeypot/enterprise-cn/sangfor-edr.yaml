@@ -1,0 +1,9 @@
+# 深信服 EDR 终端管理平台
+- method: GET
+  path: "/edr/"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "nginx"
+  body: |
+    <!DOCTYPE html><html lang=zh-CN><head><meta charset=utf-8><title>深信服EDR</title><style>body{font-family:"Microsoft YaHei",sans-serif;background:#1a1a2e;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#2a2a40;padding:40px;width:340px;border-radius:6px;color:#e0e0e0}.login-box .logo{text-align:center;color:#0c9;font-size:20px;font-weight:bold;margin-bottom:28px}.login-box input{width:100%;padding:10px;margin-bottom:14px;background:#1a1a2e;border:1px solid #444;border-radius:3px;color:#e0e0e0;box-sizing:border-box}.login-box button{width:100%;padding:10px;background:#0c9;color:#1a1a2e;border:none;border-radius:3px;cursor:pointer;font-weight:bold}</style></head><body><div class=login-box><div class=logo>深信服EDR</div><form method=POST action=/edr/login><input type=text name=username placeholder=用户名><input type=password name=password placeholder=密码><button type=submit>登 录</button></form></div></body></html>

@@ -1,0 +1,10 @@
+# 若依 RuoYi 登录接口
+- method: POST
+  path: "/dev-api/login"
+  status: 200
+  content-type: application/json
+  headers:
+    Server: "nginx"
+    Content-Type: "application/json;charset=UTF-8"
+  body: |
+    {"code":200,"msg":"操作成功","token":"Bearer eyJhbGciOiJIUzUxMiJ9.eyJ1c2VyX2lkIjoxLCJ1c2VybmFtZSI6ImFkbWluIn0.abc123def456"}

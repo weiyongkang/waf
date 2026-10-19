@@ -1,0 +1,22 @@
+- method: GET
+  path: /solr
+  status: 200
+  content-type: text/html
+  headers:
+    Server: Jetty(9.4.53)
+  body: "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"utf-8\"\
+    >\n    <title>Solr Admin</title>\n    <style>\n        body { font-family: Arial,\
+    \ sans-serif; background: #f4f4f4; display: flex; justify-content: center; align-items:\
+    \ center; height: 100vh; margin: 0; }\n        .login-box { background: #fff;\
+    \ padding: 36px; border-radius: 4px; border: 1px solid #ddd; width: 320px; }\n\
+    \        .login-box h2 { text-align: center; color: #d9411e; margin-bottom: 24px;\
+    \ }\n        .login-box input { width: 100%; padding: 10px; margin-bottom: 14px;\
+    \ border: 1px solid #ccc; border-radius: 3px; box-sizing: border-box; }\n    \
+    \    .login-box button { width: 100%; padding: 10px; background: #d9411e; color:\
+    \ #fff; border: none; border-radius: 3px; cursor: pointer; font-size: 15px; }\n\
+    \    </style>\n</head>\n<body>\n    <div class=\"login-box\">\n        <h2>Apache\
+    \ Solr</h2>\n        <form method=\"POST\" action=\"/solr/admin/auth\">\n    \
+    \        <input type=\"text\" name=\"username\" placeholder=\"Username\">\n  \
+    \          <input type=\"password\" name=\"password\" placeholder=\"Password\"\
+    >\n            <button type=\"submit\">Login</button>\n        </form>\n    </div>\n\
+    </body>\n</html>\n"

@@ -1,0 +1,19 @@
+# .git/config 泄露探测
+- method: GET
+  path: "/.git/config"
+  status: 200
+  content-type: text/plain
+  headers:
+    Server: "nginx"
+  body: |
+    [core]
+    	repositoryformatversion = 0
+    	filemode = true
+    	bare = false
+    	logallrefupdates = true
+    [remote "origin"]
+    	url = git@github.com:company/private-repo.git
+    	fetch = +refs/heads/*:refs/remotes/origin/*
+    [branch "main"]
+    	remote = origin
+    	merge = refs/heads/main

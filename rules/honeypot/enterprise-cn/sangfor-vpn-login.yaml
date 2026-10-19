@@ -1,0 +1,9 @@
+# 深信服 SSL VPN 登录接口
+- method: POST
+  path: "/vpn/login"
+  status: 200
+  content-type: application/json
+  headers:
+    Server: "Sangfor-Engine/7.6.8"
+  body: |
+    {"success":true,"data":{"token":"sangfor_ssl_token_2025","user":"admin","role":"administrator","group":"全部用户"}}

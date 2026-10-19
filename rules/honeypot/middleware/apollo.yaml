@@ -1,0 +1,23 @@
+- method: GET
+  path: /apollo
+  status: 200
+  content-type: text/html
+  headers:
+    Server: nginx
+  body: "<!DOCTYPE html>\n<html>\n<head>\n    <title>Apollo Config</title>\n    <style>\n\
+    \        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background:\
+    \ #fff; margin: 0; }\n        .navbar { background: #2c3e50; padding: 12px 24px;\
+    \ color: #fff; font-size: 16px; }\n        .navbar a { color: #bdc3c7; text-decoration:\
+    \ none; margin-right: 24px; font-size: 14px; }\n        .content { padding: 24px;\
+    \ font-size: 14px; }\n        table { border-collapse: collapse; width: 100%;\
+    \ border: 1px solid #e0e0e0; }\n        th { background: #f5f5f5; padding: 10px;\
+    \ text-align: left; border-bottom: 1px solid #e0e0e0; }\n        td { padding:\
+    \ 10px; border-bottom: 1px solid #f0f0f0; }\n    </style>\n</head>\n<body>\n \
+    \   <div class=\"navbar\">\n        Apollo Config Portal\n        <a href=\"/apollo/app\"\
+    >Applications</a>\n        <a href=\"/apollo/cluster\">Clusters</a>\n        <a\
+    \ href=\"/apollo/namespace\">Namespaces</a>\n    </div>\n    <div class=\"content\"\
+    >\n        <h2>Applications</h2>\n        <table>\n        <tr><th>AppId</th><th>Name</th><th>Department</th><th>Owner</th></tr>\n\
+    \        <tr><td>order-service</td><td>Order Service</td><td>Platform</td><td>team-a@example.com</td></tr>\n\
+    \        <tr><td>user-service</td><td>User Service</td><td>Platform</td><td>team-b@example.com</td></tr>\n\
+    \        <tr><td>payment-gateway</td><td>Payment Gateway</td><td>Finance</td><td>fintech@example.com</td></tr>\n\
+    \        </table>\n    </div>\n</body>\n</html>\n"

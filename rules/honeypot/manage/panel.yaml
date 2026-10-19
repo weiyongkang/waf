@@ -1,0 +1,23 @@
+- method: GET
+  path: /panel
+  status: 200
+  content-type: text/html
+  headers:
+    Server: nginx
+  body: "<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n    <meta charset=\"UTF-8\"\
+    >\n    <title>管理面板</title>\n    <style>\n        body { font-family: 'Microsoft\
+    \ YaHei', sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2\
+    \ 100%); display: flex; justify-content: center; align-items: center; height:\
+    \ 100vh; margin: 0; }\n        .login-box { background: rgba(255,255,255,0.95);\
+    \ padding: 50px; border-radius: 12px; width: 380px; }\n        .login-box h2 {\
+    \ text-align: center; color: #333; margin-bottom: 35px; }\n        .login-box\
+    \ input { width: 100%; padding: 12px; margin-bottom: 18px; border: 1px solid #e0e0e0;\
+    \ border-radius: 6px; box-sizing: border-box; font-size: 14px; }\n        .login-box\
+    \ button { width: 100%; padding: 12px; background: linear-gradient(135deg, #667eea,\
+    \ #764ba2); color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size:\
+    \ 16px; }\n    </style>\n</head>\n<body>\n    <div class=\"login-box\">\n    \
+    \    <h2>管理面板</h2>\n        <form method=\"POST\" action=\"/panel/login\">\n \
+    \           <input type=\"text\" name=\"username\" placeholder=\"用户名\">\n    \
+    \        <input type=\"password\" name=\"password\" placeholder=\"密码\">\n    \
+    \        <button type=\"submit\">登 录</button>\n        </form>\n    </div>\n</body>\n\
+    </html>\n"

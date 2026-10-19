@@ -1,0 +1,13 @@
+# GitLab 自托管实例登录页
+- method: GET
+  path: "/gitlab"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: nginx
+  body: |
+    <!DOCTYPE html>
+    <html lang="en">
+    <head><meta charset="utf-8"><title>Sign in · GitLab</title>
+    <style>body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#f0f0f0;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#fff;padding:40px;width:400px;text-align:center}.login-box .logo svg{width:48px;height:48px;fill:#e24329}.login-box h1{font-size:24px;color:#333;margin:16px 0 24px}.login-box input{width:100%;padding:12px;margin-bottom:12px;border:1px solid #dbdbdb;border-radius:4px;box-sizing:border-box;font-size:14px}.login-box button{width:100%;padding:12px;background:#1f75cb;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:15px}</style></head>
+    <body><div class="login-box"><h1>GitLab</h1><form method="POST" action="/gitlab/users/sign_in"><input type="text" name="user[login]" placeholder="Username or email"><input type="password" name="user[password]" placeholder="Password"><button type="submit">Sign in</button></form></div></body></html>

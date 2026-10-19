@@ -1,0 +1,10 @@
+# Yii Framework Gii 代码生成器
+- method: GET
+  path: "/gii"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "nginx"
+    X-Powered-By: "Yii Framework"
+  body: |
+    <!DOCTYPE html><html><head><title>Gii - Yii Code Generator</title><style>body{font-family:sans-serif;background:#f8f8f8;margin:0}.navbar{background:#337ab7;color:#fff;padding:10px 20px;font-size:16px}.content{padding:24px}.card{background:#fff;border:1px solid #ddd;border-radius:4px;padding:16px;margin:12px;display:inline-block;width:240px;vertical-align:top}.card h3{color:#337ab7;margin:0 0 8px}</style></head><body><div class=navbar>Gii — Yii Code Generator</div><div class=content><div class=card><h3>Model Generator</h3><p>Generate model class for DB table</p></div><div class=card><h3>CRUD Generator</h3><p>Generate CRUD controllers and views</p></div><div class=card><h3>Controller Generator</h3><p>Generate controller class</p></div><div class=card><h3>Form Generator</h3><p>Generate form model class</p></div></div></body></html>

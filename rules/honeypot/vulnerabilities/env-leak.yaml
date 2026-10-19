@@ -1,0 +1,15 @@
+# .env 文件泄露（通用）
+- method: GET
+  path: "/.env"
+  status: 200
+  content-type: text/plain
+  headers:
+    Server: "nginx"
+  body: |
+    DB_HOST=prod-db.internal
+    DB_USER=app_user
+    DB_PASS=SuperSecret123!
+    API_KEY=sk-proj-abc123def456ghi789jkl
+    JWT_SECRET=mY-sUpEr-sEcReT-jWt-kEy-2025
+    AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+    AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY

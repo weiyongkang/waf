@@ -1,0 +1,25 @@
+- method: GET
+  path: /kibana
+  status: 200
+  content-type: text/html
+  headers:
+    Server: nginx
+  body: "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"utf-8\"\
+    >\n    <title>Kibana</title>\n    <style>\n        body { font-family: 'Inter',\
+    \ -apple-system, BlinkMacSystemFont, sans-serif; background: #f7f8fc; display:\
+    \ flex; justify-content: center; align-items: center; height: 100vh; margin: 0;\
+    \ }\n        .login-box { background: #fff; padding: 48px; border-radius: 8px;\
+    \ box-shadow: 0 4px 24px rgba(0,0,0,0.06); width: 360px; }\n        .login-box\
+    \ .logo { text-align: center; margin-bottom: 32px; }\n        .login-box .logo\
+    \ span { font-size: 20px; color: #343741; font-weight: 600; }\n        .login-box\
+    \ input { width: 100%; padding: 12px; margin-bottom: 16px; border: 1px solid #d3dae6;\
+    \ border-radius: 6px; box-sizing: border-box; font-size: 14px; }\n        .login-box\
+    \ button { width: 100%; padding: 12px; background: #07c; color: #fff; border:\
+    \ none; border-radius: 6px; cursor: pointer; font-size: 15px; font-weight: 500;\
+    \ }\n        .login-box button:hover { background: #0066b3; }\n    </style>\n\
+    </head>\n<body>\n    <div class=\"login-box\">\n        <div class=\"logo\">\n\
+    \            <span>Kibana</span>\n        </div>\n        <form method=\"POST\"\
+    \ action=\"/kibana/login\">\n            <input type=\"text\" name=\"username\"\
+    \ placeholder=\"Username\">\n            <input type=\"password\" name=\"password\"\
+    \ placeholder=\"Password\">\n            <button type=\"submit\">Log in</button>\n\
+    \        </form>\n    </div>\n</body>\n</html>\n"

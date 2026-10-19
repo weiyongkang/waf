@@ -1,0 +1,9 @@
+# 用友 NC Cloud 大型企业ERP
+- method: GET
+  path: "/nc/"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "Apache-Coyote/1.1"
+  body: |
+    <!DOCTYPE html><html lang=zh-CN><head><meta charset=utf-8><title>用友NC Cloud</title><style>body{font-family:"Microsoft YaHei",sans-serif;background:#eef2f8;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#fff;padding:42px;width:360px;border:1px solid #dde;border-radius:4px}.login-box .logo{text-align:center;color:#e60012;font-size:22px;font-weight:bold;margin-bottom:24px}.login-box input{width:100%;padding:10px;margin-bottom:14px;border:1px solid #ccc;border-radius:3px;box-sizing:border-box}.login-box button{width:100%;padding:10px;background:#e60012;color:#fff;border:none;border-radius:3px;cursor:pointer}</style></head><body><div class=login-box><div class=logo>用友NC Cloud</div><form method=POST action=/nc/login><input type=text name=userCode placeholder=用户名><input type=password name=password placeholder=密码><button type=submit>登 录</button></form></div></body></html>

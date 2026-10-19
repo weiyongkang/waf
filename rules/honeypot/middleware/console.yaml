@@ -1,0 +1,24 @@
+# Java 中间件管理控制台
+- method: GET
+  path: /console
+  status: 200
+  content-type: text/html
+  headers:
+    Server: Apache-Coyote/1.1
+  body: "<!DOCTYPE html>\n<html>\n<head>\n    <meta charset=\"utf-8\">\n    <title>Oracle\
+    \ WebLogic Server Administration Console</title>\n    <style>\n        body {\
+    \ font-family: Arial, sans-serif; background: #f0f0f0; display: flex; justify-content:\
+    \ center; align-items: center; height: 100vh; margin: 0; }\n        .login-box\
+    \ { background: #fff; padding: 36px; border: 1px solid #ccc; width: 360px; box-shadow:\
+    \ 0 2px 12px rgba(0,0,0,0.08); }\n        .login-box .brand { text-align: center;\
+    \ color: #b0281a; font-size: 18px; font-weight: bold; margin-bottom: 24px; }\n\
+    \        .login-box input { width: 100%; padding: 10px; margin-bottom: 12px; border:\
+    \ 1px solid #bbb; box-sizing: border-box; font-size: 14px; }\n        .login-box\
+    \ button { width: 100%; padding: 10px; background: #4a90d9; color: #fff; border:\
+    \ none; cursor: pointer; font-size: 14px; }\n    </style>\n</head>\n<body>\n \
+    \   <div class=\"login-box\">\n        <div class=\"brand\">Oracle WebLogic Server\
+    \ 14.1.1.0</div>\n        <form method=\"POST\" action=\"/console/j_security_check\"\
+    >\n            <input type=\"text\" name=\"j_username\" placeholder=\"Username\"\
+    >\n            <input type=\"password\" name=\"j_password\" placeholder=\"Password\"\
+    >\n            <button type=\"submit\">Log In</button>\n        </form>\n    </div>\n\
+    </body>\n</html>\n"

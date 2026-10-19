@@ -1,0 +1,8 @@
+- method: GET
+  path: /nginx-stub-status
+  status: 200
+  content-type: text/plain
+  headers:
+    Server: nginx/1.24.0
+  body: "Active connections: 47 \nserver accepts handled requests\n938271 938271 2244103\
+    \ \nReading: 0 Writing: 5 Waiting: 42\n"

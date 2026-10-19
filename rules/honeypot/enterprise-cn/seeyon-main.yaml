@@ -1,0 +1,13 @@
+# 致远 Seeyon OA 登录页
+- method: GET
+  path: "/seeyon/main.do"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "nginx"
+    Set-Cookie: "JSESSIONID=seeyon123"
+  body: |
+    <!DOCTYPE html><html lang=zh-CN><head><meta charset=utf-8><title>致远OA</title>
+    <style>body{font-family:"Microsoft YaHei",sans-serif;background:#eef2f7;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#fff;padding:44px;border-radius:6px;width:380px;box-shadow:0 4px 20px rgba(0,0,0,.08)}.login-box .logo{text-align:center;color:#e60012;font-size:26px;font-weight:bold;margin-bottom:6px}.login-box .sub{text-align:center;color:#999;font-size:12px;margin-bottom:28px}.login-box input{width:100%;padding:10px;margin-bottom:14px;border:1px solid #d9dde3;border-radius:3px;box-sizing:border-box}.login-box input:focus{border-color:#e60012;outline:none}.login-box button{width:100%;padding:10px;background:#e60012;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:15px}</style></head>
+    <body><div class=login-box><div class=logo>Seeyon</div><div class=sub>致远协同管理平台</div>
+    <form method=POST action=/seeyon/main.do><input type=text name=username placeholder=用户名><input type=password name=password placeholder=密码><button type=submit>登 录</button></form></div></body></html>

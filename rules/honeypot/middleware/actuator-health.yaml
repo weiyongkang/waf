@@ -1,0 +1,12 @@
+- method: GET
+  path: /actuator/health
+  status: 200
+  content-type: application/json
+  headers:
+    Server: nginx/1.25.3
+  body: "{\n  \"status\": \"UP\",\n  \"components\": {\n    \"db\": { \"status\":\
+    \ \"UP\", \"details\": { \"database\": \"PostgreSQL\", \"validationQuery\": \"\
+    isValid()\" } },\n    \"diskSpace\": { \"status\": \"UP\", \"details\": { \"total\"\
+    : 250685575168, \"free\": 124637184000, \"threshold\": 10485760, \"path\": \"\
+    /opt/app\" } },\n    \"ping\": { \"status\": \"UP\" },\n    \"redis\": { \"status\"\
+    : \"UP\", \"details\": { \"version\": \"7.2.4\" } }\n  }\n}\n"

@@ -1,0 +1,22 @@
+- method: GET
+  path: /jmx-console
+  status: 200
+  content-type: text/html
+  headers:
+    Server: Apache-Coyote/1.1
+  body: "<!DOCTYPE html>\n<html>\n<head>\n    <title>JBoss JMX Console</title>\n \
+    \   <style>\n        body { font-family: Verdana, Arial, sans-serif; font-size:\
+    \ 12px; background: #fff; margin: 20px; }\n        h1 { color: #333; border-bottom:\
+    \ 1px solid #ccc; padding-bottom: 8px; }\n        table { border-collapse: collapse;\
+    \ width: 100%; }\n        th { background: #e0e0e0; padding: 6px; text-align:\
+    \ left; border: 1px solid #ccc; }\n        td { padding: 6px; border: 1px solid\
+    \ #ddd; }\n        a { color: #0066cc; text-decoration: none; }\n        .header\
+    \ { background: #3b3b3b; color: #fff; padding: 8px 16px; font-size: 14px; }\n\
+    \    </style>\n</head>\n<body>\n    <div class=\"header\">JBoss AS 7.4.0.GA /\
+    \ WildFly 26</div>\n    <h1>JMX Agent View</h1>\n    <p>ObjectName Filter: <input\
+    \ type=\"text\" size=\"40\"> <button>Apply</button></p>\n    <table>\n    <tr><th>Domain</th><th>Properties</th></tr>\n\
+    \    <tr><td><a href=\"#\">jboss.as</a></td><td>subsystem=datasources,data-source=ExampleDS</td></tr>\n\
+    \    <tr><td><a href=\"#\">jboss.as</a></td><td>subsystem=undertow,server=default-server,http-listener=default</td></tr>\n\
+    \    <tr><td><a href=\"#\">java.lang</a></td><td>type=Runtime</td></tr>\n    <tr><td><a\
+    \ href=\"#\">java.lang</a></td><td>type=Memory</td></tr>\n    </table>\n</body>\n\
+    </html>\n"

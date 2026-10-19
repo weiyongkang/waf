@@ -1,0 +1,10 @@
+# 泛微 Ecology 登录接口
+- method: POST
+  path: "/ecology/login.jsp"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "nginx"
+    Set-Cookie: "ecology_JSessionid=XYZ789; Path=/ecology"
+  body: |
+    <!DOCTYPE html><html><head><meta http-equiv=refresh content="0;url=/ecology/main.jsp"></head><body></body></html>

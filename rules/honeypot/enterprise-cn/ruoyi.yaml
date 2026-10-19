@@ -1,0 +1,9 @@
+# 若依 RuoYi 后台管理系统
+- method: GET
+  path: "/ruoyi/"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "nginx"
+  body: |
+    <!DOCTYPE html><html lang=zh-CN><head><meta charset=utf-8><title>若依管理系统</title><style>body{font-family:"Microsoft YaHei",sans-serif;background:url(data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 1440 320%22><path fill=%22%234281c2%22 d=%22M0,160L48,144C96,128,192,96,288,80C384,64,480,64,576,80C672,96,768,128,864,128C960,128,1056,96,1152,80C1248,64,1344,64,1392,64L1440,64L1440,0L1392,0C1344,0,1248,0,1152,0C1056,0,960,0,864,0C768,0,672,0,576,0C480,0,384,0,288,0C192,0,96,0,48,0L0,0Z%22/></svg>) bottom no-repeat;background-size:cover;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#fff;padding:48px;width:360px;border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,.1)}.login-box h2{text-align:center;color:#333;margin-bottom:32px}.login-box input{width:100%;padding:12px;margin-bottom:16px;border:1px solid #e0e0e0;border-radius:4px;box-sizing:border-box}.login-box button{width:100%;padding:12px;background:#1890ff;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:16px}</style></head><body><div class=login-box><h2>若依管理系统</h2><form method=POST action=/ruoyi/login><input type=text name=username placeholder=用户名><input type=password name=password placeholder=密码><input type=text name=code placeholder=验证码 style=width:60%><button type=submit>登 录</button></form></div></body></html>

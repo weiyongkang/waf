@@ -1,0 +1,13 @@
+# Redis Commander Web 管理工具
+- method: GET
+  path: "/redis-commander"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "nginx"
+  body: |
+    <!DOCTYPE html>
+    <html lang="en">
+    <head><meta charset="utf-8"><title>Redis Commander</title>
+    <style>body{font-family:monospace;background:#1e1e1e;color:#d4d4d4;margin:0}.header{background:#dc382c;padding:10px 24px;color:#fff;font-size:16px;font-weight:bold}.sidebar{float:left;width:220px;background:#252526;min-height:100vh;padding:16px;box-sizing:border-box}.sidebar .key{display:block;color:#ce9178;padding:4px 0;font-size:13px}.content{margin-left:220px;padding:16px}.info{color:#6a9955;font-size:13px}</style></head>
+    <body><div class="header">Redis Commander v0.8.0</div><div class="sidebar"><strong style="color:#569cd6">db0 (127.0.0.1:6379)</strong><span class="key">├ preference:read</span><span class="key">├ user:1001</span><span class="key">├ session:abc123</span><span class="key">└ cache:homepage</span></div><div class="content"><p class="info"># Keys: 1,284 · Memory: 2.41 MB · Uptime: 14d</p></div></body></html>

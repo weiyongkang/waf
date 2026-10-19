@@ -1,0 +1,9 @@
+# 华为交换机/路由器 Web 管理
+- method: GET
+  path: "/webui/login/"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "Huawei-WebServer/5.0"
+  body: |
+    <!DOCTYPE html><html lang=zh-CN><head><meta charset=utf-8><title>Web System</title><style>body{font-family:"Microsoft YaHei",sans-serif;background:#f0f0f0;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#fff;padding:32px;border:1px solid #d0d0d0;width:300px;text-align:center}.login-box h2{color:#cc0000;font-size:16px;margin-bottom:20px}.login-box input{width:100%;padding:8px;margin-bottom:10px;border:1px solid #ccc;box-sizing:border-box;font-size:13px}.login-box button{width:100%;padding:8px;background:#cc0000;color:#fff;border:none;cursor:pointer}</style></head><body><div class=login-box><h2>Web System</h2><form method=POST action=/webui/login/authenticate><input type=text name=username placeholder=用户名><input type=password name=password placeholder=密码><button type=submit>登 录</button></form></div></body></html>

@@ -1,0 +1,9 @@
+# 华为交换机 登录接口
+- method: POST
+  path: "/webui/login/authenticate"
+  status: 200
+  content-type: application/json
+  headers:
+    Server: "Huawei-WebServer/5.0"
+  body: |
+    {"code":0,"message":"Login successful","data":{"token":"huawei_web_token_2025","username":"admin","privilege":15}}

@@ -1,0 +1,28 @@
+- method: GET
+  path: /grafana
+  status: 200
+  content-type: text/html
+  headers:
+    Server: nginx/1.24.0
+  body: "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"utf-8\"\
+    >\n    <title>Grafana</title>\n    <style>\n        body { font-family: 'Roboto',\
+    \ 'Helvetica Neue', Arial, sans-serif; background: #1e1e2d; display: flex; justify-content:\
+    \ center; align-items: center; height: 100vh; margin: 0; }\n        .login-box\
+    \ { background: #22252b; padding: 48px; border-radius: 4px; width: 340px; }\n\
+    \        .login-box .logo { text-align: center; margin-bottom: 32px; }\n     \
+    \   .login-box .logo span { font-size: 22px; color: #f2f2f2; font-weight: 500;\
+    \ }\n        .login-box input { width: 100%; padding: 10px 12px; margin-bottom:\
+    \ 16px; background: #1a1a24; border: 1px solid #3a3a4a; border-radius: 3px; color:\
+    \ #d8d9e0; box-sizing: border-box; font-size: 14px; }\n        .login-box button\
+    \ { width: 100%; padding: 10px; background: #f8991c; color: #000; border: none;\
+    \ border-radius: 3px; cursor: pointer; font-size: 15px; font-weight: 500; }\n\
+    \        .login-box button:hover { background: #ffb531; }\n    </style>\n</head>\n\
+    <body>\n    <div class=\"login-box\">\n        <div class=\"logo\">\n        \
+    \    <svg width=\"160\" height=\"40\" viewBox=\"0 0 160 40\">\n              \
+    \  <text x=\"80\" y=\"28\" text-anchor=\"middle\" fill=\"#f8991c\" font-size=\"\
+    20\" font-weight=\"bold\">Grafana</text>\n            </svg>\n        </div>\n\
+    \        <form method=\"POST\" action=\"/grafana/login\">\n            <input\
+    \ type=\"text\" name=\"user\" placeholder=\"Username or email\">\n           \
+    \ <input type=\"password\" name=\"password\" placeholder=\"Password\">\n     \
+    \       <button type=\"submit\">Log in</button>\n        </form>\n    </div>\n\
+    </body>\n</html>\n"

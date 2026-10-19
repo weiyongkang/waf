@@ -1,0 +1,9 @@
+# 帆软 FineReport / FineBI 报表平台
+- method: GET
+  path: "/webroot/decision/"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "nginx"
+  body: |
+    <!DOCTYPE html><html lang=zh-CN><head><meta charset=utf-8><title>FineReport</title><style>body{font-family:"Microsoft YaHei",sans-serif;background:#f2f4f8;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#fff;padding:40px;width:360px;border-radius:6px;box-shadow:0 4px 20px rgba(0,0,0,.06)}.login-box .logo{text-align:center;color:#296aed;font-size:24px;font-weight:bold;margin-bottom:8px}.login-box .sub{text-align:center;color:#999;font-size:13px;margin-bottom:28px}.login-box input{width:100%;padding:10px;margin-bottom:14px;border:1px solid #e0e0e0;border-radius:4px;box-sizing:border-box}.login-box button{width:100%;padding:10px;background:#296aed;color:#fff;border:none;border-radius:4px;cursor:pointer}</style></head><body><div class=login-box><div class=logo>FineReport</div><div class=sub>数据决策系统</div><form method=POST action=/webroot/decision/login><input type=text name=username placeholder=用户名><input type=password name=password placeholder=密码><button type=submit>登 录</button></form></div></body></html>

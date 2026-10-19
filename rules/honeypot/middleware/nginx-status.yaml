@@ -1,0 +1,9 @@
+# Web 服务器状态与信息页面
+- method: GET
+  path: /nginx_status
+  status: 200
+  content-type: text/plain
+  headers:
+    Server: nginx/1.26.0
+  body: "Active connections: 128 \nserver accepts handled requests\n1582947 1582947\
+    \ 3928471 \nReading: 3 Writing: 12 Waiting: 113\n"

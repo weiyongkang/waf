@@ -1,0 +1,14 @@
+# CouchDB Fauxton Web 管理界面
+- method: GET
+  path: "/_utils"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "CouchDB/3.3.3 (Erlang OTP/25)"
+  body: |
+    <!DOCTYPE html>
+    <html lang="en">
+    <head><meta charset="utf-8"><title>Fauxton - CouchDB Dashboard</title>
+    <style>body{font-family:Arial,sans-serif;background:#f4f4f4;color:#333;margin:0}.header{background:#e74c3c;color:#fff;padding:12px 24px;font-size:18px;font-weight:bold}.nav{background:#2c3e50;padding:8px 24px}.nav a{color:#bdc3c7;text-decoration:none;margin-right:20px;font-size:13px}.content{padding:24px}.card{background:#fff;border:1px solid #ddd;border-radius:3px;padding:16px;margin-bottom:12px}.card h3{margin:0 0 8px;color:#e74c3c;font-size:16px}</style></head>
+    <body><div class="header">CouchDB Administration</div><div class="nav"><a href="/_utils/">Overview</a><a href="/_utils/database.html">Databases</a><a href="/_all_dbs">All DBs</a></div>
+    <div class="content"><div class="card"><h3>_users</h3><p>6 documents</p></div><div class="card"><h3>orders</h3><p>15,284 documents · 8.2 MB</p></div></div></body></html>

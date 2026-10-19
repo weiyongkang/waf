@@ -1,0 +1,22 @@
+- method: GET
+  path: /ibm/console
+  status: 200
+  content-type: text/html
+  headers:
+    Server: WebSphere Application Server/9.0
+  body: "<!DOCTYPE html>\n<html>\n<head>\n    <title>WebSphere Application Server\
+    \ - Administrative Console</title>\n    <style>\n        body { font-family: Arial,\
+    \ sans-serif; background: #e5edf3; display: flex; justify-content: center; align-items:\
+    \ center; height: 100vh; margin: 0; }\n        .login-box { background: #fff;\
+    \ padding: 40px; border: 1px solid #a0b8cc; width: 340px; }\n        .login-box\
+    \ .logo { text-align: center; margin-bottom: 24px; }\n        .login-box .logo\
+    \ span { color: #00356b; font-size: 18px; font-weight: bold; }\n        .login-box\
+    \ input { width: 100%; padding: 8px; margin-bottom: 12px; border: 1px solid #8fa4b8;\
+    \ box-sizing: border-box; }\n        .login-box button { width: 100%; padding:\
+    \ 8px; background: #00468b; color: #fff; border: none; cursor: pointer; }\n  \
+    \  </style>\n</head>\n<body>\n    <div class=\"login-box\">\n        <div class=\"\
+    logo\"><span>WebSphere Application Server</span></div>\n        <form method=\"\
+    POST\" action=\"/ibm/console/login.do\">\n            <input type=\"text\" name=\"\
+    j_username\" placeholder=\"User ID\">\n            <input type=\"password\" name=\"\
+    j_password\" placeholder=\"Password\">\n            <button type=\"submit\">Log\
+    \ in</button>\n        </form>\n    </div>\n</body>\n</html>\n"

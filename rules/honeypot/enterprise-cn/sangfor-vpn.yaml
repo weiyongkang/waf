@@ -1,0 +1,9 @@
+# 深信服 Sangfor SSL VPN
+- method: GET
+  path: "/sangfor/"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "Sangfor-AD-7.0"
+  body: |
+    <!DOCTYPE html><html lang=zh-CN><head><meta charset=utf-8><title>深信服SSL VPN</title><style>body{font-family:"Microsoft YaHei",sans-serif;background:#f0f4f8;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#fff;padding:40px;width:360px;border:1px solid #dde;border-radius:4px}.login-box .logo{text-align:center;color:#0088cc;font-size:20px;font-weight:bold;margin-bottom:28px}.login-box input{width:100%;padding:10px;margin-bottom:14px;border:1px solid #ccc;border-radius:3px;box-sizing:border-box}.login-box button{width:100%;padding:10px;background:#0088cc;color:#fff;border:none;border-radius:3px;cursor:pointer}</style></head><body><div class=login-box><div class=logo>深信服 SSL VPN</div><form method=POST action=/sangfor/vpn/login><input type=text name=username placeholder=用户名><input type=password name=password placeholder=密码><button type=submit>登 录</button></form></div></body></html>

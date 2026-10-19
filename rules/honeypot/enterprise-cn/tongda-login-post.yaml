@@ -1,0 +1,10 @@
+# 通达 Tongda OA 登录接口
+- method: POST
+  path: "/general/login_code.php"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "Apache/2.4.57"
+    X-Powered-By: "PHP/7.4.33"
+  body: |
+    <!DOCTYPE html><html><head><meta http-equiv=refresh content="0;url=/general/index.php"></head><body></body></html>

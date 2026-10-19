@@ -1,0 +1,22 @@
+- method: GET
+  path: /composer.json
+  status: 200
+  content-type: application/json
+  headers:
+    Server: nginx/1.18.0
+  body: "{\n  \"name\": \"example/web-application\",\n  \"description\": \"Composer\
+    \ Application\",\n  \"type\": \"project\",\n  \"license\": \"MIT\",\n  \"require\"\
+    : {\n      \"php\": \"^7.4|^8.0\",\n      \"laravel/framework\": \"^8.0\",\n \
+    \     \"guzzlehttp/guzzle\": \"^7.0.1\",\n      \"aws/aws-sdk-php\": \"^3.0\"\
+    ,\n      \"predis/predis\": \"^1.1\",\n      \"stripe/stripe-php\": \"^7.0\"\n\
+    \  },\n  \"require-dev\": {\n      \"phpunit/phpunit\": \"^9.0\",\n      \"mockery/mockery\"\
+    : \"^1.4\",\n      \"fakerphp/faker\": \"^1.9.1\"\n  },\n  \"autoload\": {\n \
+    \     \"psr-4\": {\n          \"App\\\\\": \"app/\",\n          \"Database\\\\\
+    Factories\\\\\": \"database/factories/\",\n          \"Database\\\\Seeders\\\\\
+    \": \"database/seeders/\"\n      }\n  },\n  \"scripts\": {\n      \"post-autoload-dump\"\
+    : [\n          \"Illuminate\\\\Foundation\\\\ComposerScripts::postAutoloadDump\"\
+    ,\n          \"@php artisan package:discover --ansi\"\n      ],\n      \"post-install-cmd\"\
+    : [\n          \"@php -r \\\"file_exists('.env') || copy('.env.example', '.env');\\\
+    \"\"\n      ]\n  },\n  \"config\": {\n      \"optimize-autoloader\": true,\n \
+    \     \"preferred-install\": \"dist\",\n      \"sort-packages\": true\n  },\n\
+    \  \"minimum-stability\": \"dev\",\n  \"prefer-stable\": true\n}\n"

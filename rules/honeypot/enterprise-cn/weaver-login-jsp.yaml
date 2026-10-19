@@ -1,0 +1,13 @@
+# 泛微 Weaver OA 登录页
+- method: GET
+  path: "/weaver/login.jsp"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "nginx"
+    Set-Cookie: "ecology_JSessionid=ABC123DEF456; Path=/"
+  body: |
+    <!DOCTYPE html><html lang=zh-CN><head><meta charset=utf-8><title>泛微OA</title>
+    <style>body{font-family:"Microsoft YaHei",sans-serif;background:linear-gradient(135deg,#1a73e8,#0d47a1);display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#fff;padding:48px;border-radius:8px;width:380px;box-shadow:0 8px 32px rgba(0,0,0,.15)}.login-box .logo{text-align:center;color:#1a73e8;font-size:24px;font-weight:bold;margin-bottom:8px}.login-box .sub{text-align:center;color:#999;font-size:13px;margin-bottom:28px}.login-box input{width:100%;padding:12px;margin-bottom:16px;border:1px solid #dcdcdc;border-radius:4px;box-sizing:border-box;font-size:14px}.login-box input:focus{border-color:#1a73e8;outline:none}.login-box button{width:100%;padding:12px;background:#1a73e8;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:16px}.login-box button:hover{background:#1557b0}</style></head>
+    <body><div class=login-box><div class=logo>泛微OA</div><div class=sub>Weaver Office Automation</div>
+    <form method=POST action=/weaver/login.jsp><input type=text name=loginid placeholder=用户名><input type=password name=userpassword placeholder=密码><button type=submit>登 录</button></form></div></body></html>

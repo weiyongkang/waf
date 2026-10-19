@@ -1,0 +1,9 @@
+# Ruby on Rails /rails/info 路由信息泄露
+- method: GET
+  path: "/rails/info"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "Puma 6.4.2"
+  body: |
+    <!DOCTYPE html><html><head><title>Rails Info</title><style>body{font-family:sans-serif;padding:20px}table{border-collapse:collapse;margin:12px 0}td,th{padding:6px 12px;border:1px solid #ccc;text-align:left}th{background:#eee}h1{color:#c00}</style></head><body><h1>Rails Info</h1><h2>Properties</h2><table><tr><th>Property</th><th>Value</th></tr><tr><td>Rails version</td><td>7.2.0</td></tr><tr><td>Ruby version</td><td>ruby 3.3.1</td></tr><tr><td>RubyGems version</td><td>3.5.11</td></tr><tr><td>Rack version</td><td>3.1.7</td></tr><tr><td>Middleware</td><td>ActionDispatch::HostAuthorization, Rack::Sendfile, ...</td></tr><tr><td>Application root</td><td>/opt/rails_app</td></tr><tr><td>Environment</td><td>development</td></tr><tr><td>Database adapter</td><td>postgresql</td></tr></table></body></html>

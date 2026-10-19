@@ -1,0 +1,9 @@
+# HashiCorp Vault 登录页
+- method: GET
+  path: "/vault"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "nginx"
+  body: |
+    <!DOCTYPE html><html lang=en><head><meta charset=utf-8><title>Vault</title><style>body{font-family:monospace;background:#1a1a1a;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#222;padding:48px;width:340px;border:1px solid #333;color:#e0e0e0}.login-box .logo{text-align:center;color:#ffec6e;font-size:24px;font-weight:bold;margin-bottom:32px}.login-box label{display:block;font-size:13px;color:#888;margin-bottom:4px}.login-box input{width:100%;padding:8px;margin-bottom:16px;background:#111;border:1px solid #444;color:#e0e0e0;box-sizing:border-box}.login-box button{width:100%;padding:10px;background:#ffec6e;color:#1a1a1a;border:none;cursor:pointer;font-weight:bold}</style></head><body><div class=login-box><div class=logo>VAULT</div><form method=POST action=/vault/ui/vault/auth><label>Method</label><input value=token disabled><label>Token</label><input type=password name=token placeholder=hvs.xxxx><button type=submit>Sign In</button></form></div></body></html>

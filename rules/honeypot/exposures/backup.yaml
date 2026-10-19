@@ -1,0 +1,15 @@
+- method: GET
+  path: /backup/
+  status: 200
+  content-type: text/html
+  headers:
+    Server: Apache/2.4.49
+  body: "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 3.2 Final//EN\">\n<html>\n  <head>\n\
+    \    <title>Index of /backup</title>\n  </head>\n  <body>\n    <h1>Index of /backup</h1>\n\
+    \    <table>\n      <tr><th>Name</th><th>Last modified</th><th>Size</th></tr>\n\
+    \      <tr><th colspan=\"3\"><hr></th></tr>\n      <tr><td><a href=\"../\">Parent\
+    \ Directory</a></td><td>&nbsp;</td><td>&nbsp;</td></tr>\n      <tr><td><a href=\"\
+    db_backup_2024_01_01.sql\">db_backup_2024_01_01.sql</a></td><td>2024-01-01 00:00</td><td>1.5M</td></tr>\n\
+    \      <tr><td><a href=\"config_backup.tar.gz\">config_backup.tar.gz</a></td><td>2023-12-31\
+    \ 23:00</td><td>2.3M</td></tr>\n      <tr><td><a href=\"www_backup.zip\">www_backup.zip</a></td><td>2023-12-31\
+    \ 22:00</td><td>15.7M</td></tr>\n    </table>\n  </body>\n</html>\n"

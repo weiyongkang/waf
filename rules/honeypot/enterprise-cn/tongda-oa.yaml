@@ -1,0 +1,9 @@
+# 通达 Tongda OA 办公系统
+- method: GET
+  path: "/tongda/"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "Apache/2.4.59"
+  body: |
+    <!DOCTYPE html><html lang=zh-CN><head><meta charset=utf-8><title>通达OA</title><style>body{font-family:"Microsoft YaHei",sans-serif;background:#f5f7fa;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#fff;padding:36px;border:1px solid #e0e0e0;width:340px;text-align:center}.login-box .logo{color:#00a0e9;font-size:24px;font-weight:bold;margin-bottom:28px}.login-box input{width:100%;padding:10px;margin-bottom:12px;border:1px solid #ddd;border-radius:2px;box-sizing:border-box}.login-box button{width:100%;padding:10px;background:#00a0e9;color:#fff;border:none;border-radius:2px;cursor:pointer}</style></head><body><div class=login-box><div class=logo>通达OA</div><form method=POST action=/tongda/login><input type=text name=UID placeholder=用户名><input type=password name=PWD placeholder=密码><button type=submit>登 录</button></form></div></body></html>

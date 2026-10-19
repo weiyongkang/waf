@@ -1,0 +1,9 @@
+# Swagger UI API 文档泄露
+- method: GET
+  path: "/swagger-ui.html"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "nginx"
+  body: |
+    <!DOCTYPE html><html><head><title>Swagger UI</title><link rel=stylesheet href=swagger-ui.css><style>body{background:#fafafa;margin:0}.topbar{background:#1b1b1b;padding:10px}.topbar a{color:#4990e2}.wrapper{padding:20px}code{background:#f0f0f0;padding:2px 6px;border-radius:3px}</style></head><body><div class=topbar><a href=/>Swagger</a> <span style=color:#ccc>Select a spec</span></div><div class=wrapper><h2>API Documentation</h2><div><code>GET /api/users</code> — List all users</div><div><code>POST /api/login</code> — User login</div><div><code>GET /api/admin/users</code> — Admin: list users</div><div><code>DELETE /api/users/{id}</code> — Delete user</div></div></body></html>

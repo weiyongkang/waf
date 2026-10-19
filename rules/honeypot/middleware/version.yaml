@@ -1,0 +1,10 @@
+- method: GET
+  path: /version
+  status: 200
+  content-type: application/json
+  headers:
+    Server: nginx
+  body: "{\n  \"Version\": \"24.0.7\",\n  \"ApiVersion\": \"1.43\",\n  \"MinAPIVersion\"\
+    : \"1.12\",\n  \"GitCommit\": \"311b9ff\",\n  \"GoVersion\": \"go1.21.6\",\n \
+    \ \"Os\": \"linux\",\n  \"Arch\": \"amd64\",\n  \"KernelVersion\": \"5.15.0-107-generic\"\
+    ,\n  \"BuildTime\": \"2024-01-23T21:45:07.000000000+00:00\"\n}\n"

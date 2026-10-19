@@ -1,0 +1,23 @@
+# API 网关与负载均衡管理页面
+- method: GET
+  path: /kong
+  status: 200
+  content-type: text/html
+  headers:
+    Server: openresty/1.21.4.3
+  body: "<!DOCTYPE html>\n<html>\n<head>\n    <title>Kong Manager</title>\n    <style>\n\
+    \        body { font-family: 'Roboto', sans-serif; background: #f4f6f9; display:\
+    \ flex; justify-content: center; align-items: center; height: 100vh; margin: 0;\
+    \ }\n        .login-box { background: #fff; padding: 40px; border-radius: 8px;\
+    \ box-shadow: 0 4px 20px rgba(0,0,0,0.06); width: 340px; }\n        .login-box\
+    \ .logo { text-align: center; color: #1155cc; font-size: 24px; font-weight: 600;\
+    \ margin-bottom: 28px; }\n        .login-box input { width: 100%; padding: 10px\
+    \ 12px; margin-bottom: 14px; border: 1px solid #d0d7de; border-radius: 4px; box-sizing:\
+    \ border-box; font-size: 14px; }\n        .login-box button { width: 100%; padding:\
+    \ 10px; background: #1155cc; color: #fff; border: none; border-radius: 4px; cursor:\
+    \ pointer; font-size: 15px; }\n    </style>\n</head>\n<body>\n    <div class=\"\
+    login-box\">\n        <div class=\"logo\">KONG MANAGER</div>\n        <form method=\"\
+    POST\" action=\"/kong/auth\">\n            <input type=\"text\" name=\"username\"\
+    \ placeholder=\"Username\">\n            <input type=\"password\" name=\"password\"\
+    \ placeholder=\"Password\">\n            <button type=\"submit\">Sign In</button>\n\
+    \        </form>\n    </div>\n</body>\n</html>\n"

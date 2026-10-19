@@ -1,0 +1,9 @@
+# SSTI (Server-Side Template Injection) — Jinja2 Flask
+- method: GET
+  path: "/{{7*7}}"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "Werkzeug/3.0.1 Python/3.12.3"
+  body: |
+    49

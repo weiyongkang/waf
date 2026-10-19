@@ -1,0 +1,16 @@
+# Apache Struts2 框架探测
+- method: GET
+  path: "/struts/webconsole.html"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "Apache-Coyote/1.1"
+    X-Struts: "2.5.30"
+  body: |
+    <!DOCTYPE html><html><head><title>Struts2 Debug Console</title><style>body{font-family:monospace;background:#111;color:#0f0;padding:20px}pre{font-size:13px}</style></head><body><h1>Apache Struts 2.5.30 — OGNL Console</h1><pre>ActionContext: {
+      'com.opensymphony.xwork2.ActionContext.name': 'default',
+      'request': HttpServletRequest,
+      'session': HttpSession (id=ABC123),
+      'application': ServletContext,
+      'parameters': { 'id': '1' }
+    }</pre></body></html>

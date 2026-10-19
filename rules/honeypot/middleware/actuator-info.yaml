@@ -1,0 +1,11 @@
+- method: GET
+  path: /actuator/info
+  status: 200
+  content-type: application/json
+  headers:
+    Server: nginx/1.25.3
+  body: "{\n  \"app\": {\n    \"name\": \"order-service\",\n    \"version\": \"2.4.1\"\
+    ,\n    \"description\": \"Order Management Microservice\"\n  },\n  \"build\":\
+    \ {\n    \"artifact\": \"order-service\",\n    \"name\": \"order-service\",\n\
+    \    \"time\": \"2025-06-08T10:14:32.427Z\",\n    \"version\": \"2.4.1\"\n  },\n\
+    \  \"git\": {\n    \"branch\": \"main\",\n    \"commit\": \"a8f2b1d\"\n  }\n}\n"

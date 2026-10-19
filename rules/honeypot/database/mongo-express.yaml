@@ -1,0 +1,17 @@
+# MongoDB Express Web 管理界面
+- method: GET
+  path: "/mongo-express"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "nginx"
+  body: |
+    <!DOCTYPE html>
+    <html lang="en">
+    <head><meta charset="utf-8"><title>mongo-express</title>
+    <style>body{font-family:Arial,sans-serif;background:#343a40;color:#e9ecef;margin:0}.navbar{background:#212529;padding:12px 24px;font-size:16px;font-weight:bold}.navbar span{color:#13aa52}.content{padding:24px}table{border-collapse:collapse;width:100%;font-size:13px}th{background:#495057;padding:8px 12px;text-align:left}td{padding:8px 12px;border-bottom:1px solid #495057}.db-name{color:#13aa52}</style></head>
+    <body><div class="navbar"><span>mongo</span>-express</div><div class="content"><h2>Databases</h2>
+    <table><tr><th>Database Name</th><th>Collections</th><th>Size</th></tr>
+    <tr><td class="db-name">admin</td><td>3</td><td>0.00 MB</td></tr>
+    <tr><td class="db-name">production</td><td>12</td><td>45.23 MB</td></tr>
+    <tr><td class="db-name">users</td><td>5</td><td>2.18 MB</td></tr></table></div></body></html>

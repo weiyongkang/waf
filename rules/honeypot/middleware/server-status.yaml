@@ -1,0 +1,46 @@
+- method: GET
+  path: /server-status
+  status: 200
+  content-type: text/html
+  headers:
+    Server: Apache/2.4.59
+  body: '<!DOCTYPE html>
+
+    <html>
+
+    <head><title>Apache Status</title></head>
+
+    <body>
+
+    <h1>Apache Server Status for localhost (via 127.0.0.1)</h1>
+
+    <dl><dt>Server Version:</dt><dd>Apache/2.4.59 (Unix)</dd></dl>
+
+    <dl><dt>Server MPM:</dt><dd>prefork</dd></dl>
+
+    <dl><dt>Current Time:</dt><dd>Sunday, 15-Jun-2025 14:32:11 UTC</dd></dl>
+
+    <dl><dt>Restart Time:</dt><dd>Sunday, 08-Jun-2025 03:15:42 UTC</dd></dl>
+
+    <dl><dt>Server uptime:</dt><dd>7 days 11 hours 16 minutes 29 seconds</dd></dl>
+
+    <dl><dt>Total accesses:</dt><dd>1284736</dd></dl>
+
+    <dl><dt>CPU Usage:</dt><dd>u2.38 s1.19 cu0 cs0</dd></dl>
+
+    <pre>___W__R_______________________________________.....</pre>
+
+    <table>
+
+    <tr><th>Srv</th><th>PID</th><th>Acc</th><th>M</th><th>CPU</th><th>SS</th><th>Req</th><th>Conn</th><th>Child</th><th>Slot</th><th>Client</th><th>VHost</th><th>Request</th></tr>
+
+    <tr><td>0-0</td><td>28471</td><td>42/284/536</td><td>W</td><td>2.38</td><td>0</td><td>0</td><td>0.0</td><td>2.35</td><td>1.19</td><td>192.168.1.100</td><td>example.com</td><td>GET
+    / HTTP/1.1</td></tr>
+
+    </table>
+
+    </body>
+
+    </html>
+
+    '

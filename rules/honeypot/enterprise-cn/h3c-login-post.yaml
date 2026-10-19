@@ -1,0 +1,11 @@
+# H3C iMC 登录接口
+- method: POST
+  path: "/imc/login.jsp"
+  status: 302
+  content-type: text/html
+  headers:
+    Server: "Apache-Coyote/1.1"
+    Location: "/imc/home.jsf"
+    Set-Cookie: "iMC_SESSION=h3c_session_token; Path=/imc"
+  body: |
+    <!DOCTYPE html><html><head><meta http-equiv=refresh content="0;url=/imc/home.jsf"></head><body></body></html>

@@ -1,0 +1,10 @@
+# 泛微 Weaver OA 协同办公平台
+- method: GET
+  path: "/weaver/"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "nginx"
+    Set-Cookie: "ecology_JSessionId=abc123; Path=/"
+  body: |
+    <!DOCTYPE html><html lang=zh-CN><head><meta charset=utf-8><title>泛微OA</title><style>body{font-family:"Microsoft YaHei",sans-serif;background:#f0f2f5;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#fff;padding:40px;width:380px;border-radius:6px;box-shadow:0 2px 12px rgba(0,0,0,.06)}.login-box .logo{text-align:center;color:#1e6fff;font-size:24px;font-weight:bold;margin-bottom:8px}.login-box .sub{text-align:center;color:#999;font-size:13px;margin-bottom:28px}.login-box input{width:100%;padding:10px 12px;margin-bottom:16px;border:1px solid #d9d9d9;border-radius:4px;box-sizing:border-box;font-size:14px}.login-box button{width:100%;padding:10px;background:#1e6fff;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:15px}</style></head><body><div class=login-box><div class=logo>泛微OA</div><div class=sub>Weaver Office Automation</div><form method=POST action=/weaver/login><input type=text name=loginid placeholder=用户名><input type=password name=userpassword placeholder=密码><button type=submit>登 录</button></form></div></body></html>

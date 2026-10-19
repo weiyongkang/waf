@@ -1,0 +1,9 @@
+# 泛微 Ecology 系统
+- method: GET
+  path: "/ecology/"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "Apache/2.4.57"
+  body: |
+    <!DOCTYPE html><html lang=zh-CN><head><meta charset=utf-8><title>泛微E-cology</title><style>body{font-family:"Microsoft YaHei",sans-serif;background:linear-gradient(135deg,#667eea,#764ba2);display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#fff;padding:48px;border-radius:8px;width:360px}.login-box h2{text-align:center;color:#333;margin-bottom:32px;font-size:22px}.login-box input{width:100%;padding:10px;margin-bottom:14px;border:1px solid #e0e0e0;border-radius:4px;box-sizing:border-box}.login-box button{width:100%;padding:10px;background:#764ba2;color:#fff;border:none;border-radius:4px;cursor:pointer}</style></head><body><div class=login-box><h2>E-cology</h2><form method=POST action=/ecology/login/Login.jsp><input type=text name=loginid placeholder=用户名><input type=password name=userpassword placeholder=密码><button type=submit>登 录</button></form></div></body></html>

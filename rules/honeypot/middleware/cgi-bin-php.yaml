@@ -1,0 +1,24 @@
+- method: GET
+  path: /cgi-bin/php
+  status: 200
+  content-type: text/html
+  headers:
+    Server: Apache/2.4.57
+    X-Powered-By: PHP/8.2.17
+  body: '<!DOCTYPE html>
+
+    <html>
+
+    <head><title>PHP CGI</title></head>
+
+    <body>
+
+    <h1>PHP CGI Test</h1>
+
+    <p>PHP is working via CGI/FastCGI.</p>
+
+    </body>
+
+    </html>
+
+    '

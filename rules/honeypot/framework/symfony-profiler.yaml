@@ -1,0 +1,9 @@
+# Symfony Profiler / Web Debug Toolbar
+- method: GET
+  path: "/_profiler"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "nginx"
+  body: |
+    <!DOCTYPE html><html><head><title>Symfony Profiler</title><style>body{font-family:sans-serif;background:#222;color:#eee;padding:20px}.header{background:#000;padding:12px 20px;margin:-20px -20px 20px}.header a{color:#a0a0ff;text-decoration:none;margin-right:16px;font-size:14px}table{border-collapse:collapse;width:100%}th{background:#333;padding:8px;text-align:left}td{padding:8px;border-bottom:1px solid #444}</style></head><body><div class=header><strong>Symfony Profiler</strong> <a href=#>Last 10</a><a href=#>Search</a></div><table><tr><th>Token</th><th>Method</th><th>URL</th><th>Time</th><th>Status</th></tr><tr><td>abc123</td><td>GET</td><td>/home</td><td>14:32:18</td><td>200</td></tr><tr><td>def456</td><td>POST</td><td>/api/login</td><td>14:32:05</td><td>302</td></tr></table></body></html>

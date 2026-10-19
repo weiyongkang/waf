@@ -1,0 +1,9 @@
+# MinIO 对象存储登录页
+- method: GET
+  path: "/minio"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "nginx"
+  body: |
+    <!DOCTYPE html><html lang=en><head><meta charset=utf-8><title>MinIO Console</title><style>body{font-family:sans-serif;background:#fafafa;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#fff;padding:40px;width:340px;border:1px solid #e0e0e0;border-radius:4px}.login-box .logo{text-align:center;color:#c72e49;font-size:22px;font-weight:bold;margin-bottom:28px}.login-box input{width:100%;padding:10px;margin-bottom:14px;border:1px solid #ddd;border-radius:3px;box-sizing:border-box}.login-box button{width:100%;padding:10px;background:#c72e49;color:#fff;border:none;border-radius:3px;cursor:pointer}</style></head><body><div class=login-box><div class=logo>MinIO Console</div><form method=POST action=/minio/api/v1/login><input type=text name=accessKey placeholder=Access Key><input type=password name=secretKey placeholder=Secret Key><button type=submit>Login</button></form></div></body></html>

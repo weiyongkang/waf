@@ -1,0 +1,29 @@
+- method: GET
+  path: /composer.lock
+  status: 200
+  content-type: application/octet-stream
+  headers:
+    Server: nginx/1.18.0
+  body: "{\n  \"_readme\": [\n      \"This file locks the dependencies of your project\
+    \ to a known state\",\n      \"Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies\"\
+    ,\n      \"This file is @generated automatically\"\n  ],\n  \"content-hash\":\
+    \ \"d751713988987e9331980363e24189ce\",\n  \"packages\": [\n      {\n        \
+    \  \"name\": \"laravel/framework\",\n          \"version\": \"v8.83.27\",\n  \
+    \        \"source\": {\n              \"type\": \"git\",\n              \"url\"\
+    : \"https://github.com/laravel/framework.git\",\n              \"reference\":\
+    \ \"e1afe088b4ca613fb96dc57e6d8dbcb8cc2c6b49\"\n          },\n          \"dist\"\
+    : {\n              \"type\": \"zip\",\n              \"url\": \"https://api.github.com/repos/laravel/framework/zipball/e1afe088b4ca613fb96dc57e6d8dbcb8cc2c6b49\"\
+    ,\n              \"reference\": \"e1afe088b4ca613fb96dc57e6d8dbcb8cc2c6b49\",\n\
+    \              \"shasum\": \"\"\n          }\n      },\n      {\n          \"\
+    name\": \"guzzlehttp/guzzle\",\n          \"version\": \"7.5.0\",\n          \"\
+    source\": {\n              \"type\": \"git\",\n              \"url\": \"https://github.com/guzzle/guzzle.git\"\
+    ,\n              \"reference\": \"b50a2a1251152e43f6a37f0fa053e730a67d25ba\"\n\
+    \          },\n          \"dist\": {\n              \"type\": \"zip\",\n     \
+    \         \"url\": \"https://api.github.com/repos/guzzle/guzzle/zipball/b50a2a1251152e43f6a37f0fa053e730a67d25ba\"\
+    ,\n              \"reference\": \"b50a2a1251152e43f6a37f0fa053e730a67d25ba\",\n\
+    \              \"shasum\": \"\"\n          }\n      }\n  ],\n  \"packages-dev\"\
+    : [\n      {\n          \"name\": \"phpunit/phpunit\",\n          \"version\"\
+    : \"9.6.5\",\n          \"source\": {\n              \"type\": \"git\",\n    \
+    \          \"url\": \"https://github.com/sebastianbergmann/phpunit.git\",\n  \
+    \            \"reference\": \"86e761949019ae83f49240b2f2123fb5ab3b2fc5\"\n   \
+    \       }\n      }\n  ]\n} "

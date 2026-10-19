@@ -1,0 +1,9 @@
+# .git 目录泄露探测
+- method: GET
+  path: "/.git/HEAD"
+  status: 200
+  content-type: text/plain
+  headers:
+    Server: "nginx"
+  body: |
+    ref: refs/heads/main

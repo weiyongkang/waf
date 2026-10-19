@@ -1,0 +1,13 @@
+- method: GET
+  path: /actuator/metrics
+  status: 200
+  content-type: application/json
+  headers:
+    Server: nginx/1.25.3
+  body: "{\n  \"names\": [\n    \"jvm.memory.max\",\n    \"jvm.memory.used\",\n  \
+    \  \"jvm.memory.committed\",\n    \"jvm.gc.pause\",\n    \"jvm.threads.live\"\
+    ,\n    \"jvm.threads.daemon\",\n    \"jvm.classes.loaded\",\n    \"process.cpu.usage\"\
+    ,\n    \"system.cpu.usage\",\n    \"system.cpu.count\",\n    \"http.server.requests\"\
+    ,\n    \"tomcat.sessions.active.max\",\n    \"tomcat.sessions.active.current\"\
+    ,\n    \"hikaricp.connections.active\",\n    \"hikaricp.connections.idle\",\n\
+    \    \"logback.events\"\n  ]\n}\n"

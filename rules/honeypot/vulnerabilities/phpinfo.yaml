@@ -1,0 +1,10 @@
+# phpinfo() 信息泄露
+- method: GET
+  path: "/phpinfo.php"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "Apache/2.4.59"
+    X-Powered-By: "PHP/8.2.17"
+  body: |
+    <!DOCTYPE html><html><head><title>phpinfo()</title><style>body{font-family:sans-serif;background:#fff;font-size:12px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:4px 8px}h1{color:#4F5B93;font-size:18px}h2{color:#4F5B93;font-size:14px}.e{background:#ccf;font-weight:bold}.v{background:#ddd}</style></head><body><h1>PHP Version 8.2.17</h1><table><tr class=h><th colspan=2>System</th></tr><tr><td class=e>System</td><td class=v>Linux webserver 5.15.0-107-generic #117-Ubuntu SMP x86_64</td></tr><tr><td class=e>Server API</td><td class=v>FPM/FastCGI</td></tr><tr><td class=e>Loaded Configuration File</td><td class=v>/etc/php/8.2/fpm/php.ini</td></tr></table></body></html>

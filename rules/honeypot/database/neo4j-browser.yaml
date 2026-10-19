@@ -1,0 +1,13 @@
+# Neo4j Browser Web 界面
+- method: GET
+  path: "/neo4j"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "nginx"
+  body: |
+    <!DOCTYPE html>
+    <html lang="en">
+    <head><meta charset="utf-8"><title>Neo4j Browser</title>
+    <style>body{font-family:monospace;background:#1c252c;color:#d1d9e0;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;flex-direction:column}.logo{color:#018bff;font-size:28px;font-weight:bold;margin-bottom:32px}.connect-box{background:#242d36;padding:36px;border-radius:6px;width:380px}.connect-box label{display:block;font-size:13px;color:#8899aa;margin-bottom:4px}.connect-box input{width:100%;padding:8px 12px;margin-bottom:16px;background:#1c252c;border:1px solid #424a53;border-radius:3px;color:#d1d9e0;box-sizing:border-box}.connect-box button{width:100%;padding:10px;background:#018bff;color:#fff;border:none;border-radius:3px;cursor:pointer;font-weight:600}</style></head>
+    <body><div class="logo">NEO4J</div><div class="connect-box"><label>Connect URL</label><input type="text" value="neo4j://localhost:7687"><label>Username</label><input type="text" value="neo4j"><label>Password</label><input type="password" placeholder="Password"><button type="submit">Connect</button></div></body></html>

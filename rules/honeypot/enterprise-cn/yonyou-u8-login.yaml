@@ -1,0 +1,12 @@
+# 用友 U8 登录页
+- method: GET
+  path: "/u8/login.aspx"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "Microsoft-IIS/10.0"
+    X-AspNet-Version: "4.0.30319"
+  body: |
+    <!DOCTYPE html><html lang=zh-CN><head><meta charset=utf-8><title>用友U8</title>
+    <style>body{font-family:"Microsoft YaHei",sans-serif;background:#e8f0fe;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#fff;padding:36px;border:1px solid #d0d0d0;width:350px}.login-box .logo{text-align:center;color:#c00;font-size:20px;font-weight:bold;margin-bottom:20px}.login-box input,select{width:100%;padding:8px;margin-bottom:12px;border:1px solid #ccc;box-sizing:border-box}.login-box button{width:100%;padding:8px;background:#c00;color:#fff;border:none;cursor:pointer}</style></head>
+    <body><div class=login-box><div class=logo>用友U8+</div><form method=POST action=/u8/login.aspx><select name=account><option>选择账套</option><option>001-演示账套</option></select><input type=text name=username placeholder=用户名><input type=password name=password placeholder=密码><button type=submit>登 录</button></form></div></body></html>

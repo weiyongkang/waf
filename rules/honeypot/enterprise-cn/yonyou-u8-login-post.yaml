@@ -1,0 +1,10 @@
+# 用友 U8 登录接口
+- method: POST
+  path: "/u8/login.aspx"
+  status: 302
+  content-type: text/html
+  headers:
+    Server: "Microsoft-IIS/10.0"
+    Location: "/u8/main.aspx"
+  body: |
+    <!DOCTYPE html><html><head><meta http-equiv=refresh content="0;url=/u8/main.aspx"></head><body></body></html>

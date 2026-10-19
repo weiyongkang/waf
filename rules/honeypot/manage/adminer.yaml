@@ -1,0 +1,32 @@
+- method: GET
+  path: /adminer
+  status: 200
+  content-type: text/html
+  headers:
+    Server: nginx/1.24.0
+  body: "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"utf-8\"\
+    >\n    <title>Adminer</title>\n    <style>\n        body { font-family: Verdana,\
+    \ Geneva, sans-serif; background: #f4f4f4; display: flex; justify-content: center;\
+    \ align-items: center; height: 100vh; margin: 0; }\n        .login-box { background:\
+    \ #fff; padding: 30px; border: 1px solid #d0d0d0; border-radius: 4px; width: 340px;\
+    \ }\n        .login-box h1 { font-size: 18px; color: #555; text-align: center;\
+    \ margin-bottom: 24px; }\n        .login-box select, .login-box input { width:\
+    \ 100%; padding: 8px; margin-bottom: 14px; border: 1px solid #ccc; border-radius:\
+    \ 3px; box-sizing: border-box; font-size: 14px; }\n        .login-box input[type=\"\
+    submit\"] { background: #337ab7; color: #fff; border: none; cursor: pointer; font-weight:\
+    \ bold; }\n        .login-box input[type=\"submit\"]:hover { background: #286090;\
+    \ }\n        .login-box label { display: block; margin-bottom: 4px; font-size:\
+    \ 13px; color: #555; }\n    </style>\n</head>\n<body>\n    <div class=\"login-box\"\
+    >\n        <h1>Login - Adminer</h1>\n        <form method=\"POST\" action=\"/adminer/\"\
+    >\n            <label>System</label>\n            <select name=\"auth[driver]\"\
+    >\n                <option value=\"server\">MySQL</option>\n                <option\
+    \ value=\"sqlite\">SQLite</option>\n                <option value=\"pgsql\">PostgreSQL</option>\n\
+    \                <option value=\"mongo\">MongoDB</option>\n            </select>\n\
+    \            <label>Server</label>\n            <input type=\"text\" name=\"auth[server]\"\
+    \ value=\"localhost\">\n            <label>Username</label>\n            <input\
+    \ type=\"text\" name=\"auth[username]\" placeholder=\"Username\">\n          \
+    \  <label>Password</label>\n            <input type=\"password\" name=\"auth[password]\"\
+    \ placeholder=\"Password\">\n            <label>Database</label>\n           \
+    \ <input type=\"text\" name=\"auth[db]\" placeholder=\"Database\">\n         \
+    \   <input type=\"submit\" value=\"Login\">\n        </form>\n    </div>\n</body>\n\
+    </html>\n"

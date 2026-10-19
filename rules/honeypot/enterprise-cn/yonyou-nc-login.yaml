@@ -1,0 +1,11 @@
+# 用友 NC 登录页
+- method: GET
+  path: "/nc/login.jsp"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "Apache/2.4.57"
+  body: |
+    <!DOCTYPE html><html lang=zh-CN><head><meta charset=utf-8><title>用友NC</title>
+    <style>body{font-family:"Microsoft YaHei",sans-serif;background:linear-gradient(180deg,#e60012,#8b0000);display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#fff;padding:40px;border-radius:6px;width:380px;box-shadow:0 8px 24px rgba(0,0,0,.2)}.login-box .logo{text-align:center;color:#e60012;font-size:24px;font-weight:bold;margin-bottom:4px}.login-box .sub{text-align:center;color:#666;font-size:13px;margin-bottom:28px}.login-box input{width:100%;padding:12px;margin-bottom:14px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box}.login-box input:focus{border-color:#e60012}.login-box button{width:100%;padding:12px;background:#e60012;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:15px}</style></head>
+    <body><div class=login-box><div class=logo>YonBIP</div><div class=sub>用友NC Cloud</div><form method=POST action=/nc/login.jsp><input type=text name=username placeholder=用户名><input type=password name=password placeholder=密码><button type=submit>登 录</button></form></div></body></html>

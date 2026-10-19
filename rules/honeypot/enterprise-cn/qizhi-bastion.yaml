@@ -1,0 +1,9 @@
+# 齐治堡垒机 / 运维安全审计系统
+- method: GET
+  path: "/bastion/"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "nginx"
+  body: |
+    <!DOCTYPE html><html lang=zh-CN><head><meta charset=utf-8><title>堡垒机</title><style>body{font-family:"Microsoft YaHei",sans-serif;background:#1b2836;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#243447;padding:40px;width:340px;border-radius:4px;color:#bdc3c7}.login-box h2{text-align:center;color:#3498db;margin-bottom:28px;font-size:18px}.login-box input{width:100%;padding:10px;margin-bottom:14px;background:#1b2836;border:1px solid #3d566e;border-radius:3px;color:#ecf0f1;box-sizing:border-box}.login-box button{width:100%;padding:10px;background:#3498db;color:#fff;border:none;border-radius:3px;cursor:pointer}</style></head><body><div class=login-box><h2>运维安全审计系统</h2><form method=POST action=/bastion/login><input type=text name=username placeholder=用户名><input type=password name=password placeholder=密码><button type=submit>登 录</button></form></div></body></html>

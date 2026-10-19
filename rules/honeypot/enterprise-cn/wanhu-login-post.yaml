@@ -1,0 +1,10 @@
+# 万户 Wanhu ezOFFICE 登录接口
+- method: POST
+  path: "/defaultroot/login.jsp"
+  status: 302
+  content-type: text/html
+  headers:
+    Server: "Apache-Coyote/1.1"
+    Location: "/defaultroot/index.jsp"
+  body: |
+    <!DOCTYPE html><html><head><meta http-equiv=refresh content="0;url=/defaultroot/index.jsp"></head><body></body></html>

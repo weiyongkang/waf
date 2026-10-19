@@ -1,0 +1,9 @@
+# Flask Werkzeug Debugger /console 调试端点
+- method: GET
+  path: "/debugger-console"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "Werkzeug/3.0.1 Python/3.12.3"
+  body: |
+    <!DOCTYPE html><html lang=en><head><meta charset=utf-8><title>Console // Werkzeug Debugger</title><style>body{font-family:monospace;background:#fff;margin:0;padding:20px}.header{background:#a00;color:#fff;padding:10px 20px;margin:-20px -20px 20px}.header h1{font-size:18px}.prompt{color:#555}.input-line{display:flex}.input-line input{flex:1;border:1px solid #ccc;padding:4px 8px;font-family:monospace}.input-line button{padding:4px 12px;background:#a00;color:#fff;border:none;cursor:pointer}</style></head><body><div class=header><h1>Werkzeug Debugger — Interactive Console</h1></div><div class=prompt>>>> </div><div class=input-line><input type=text placeholder=Python code...><button>Execute</button></div></body></html>

@@ -1,0 +1,23 @@
+- method: GET
+  path: /.htaccess
+  status: 403
+  content-type: text/html
+  headers:
+    Server: Apache/2.4.59
+  body: '<!DOCTYPE html>
+
+    <html>
+
+    <head><title>403 Forbidden</title></head>
+
+    <body>
+
+    <h1>Forbidden</h1>
+
+    <p>You don''t have permission to access this resource.</p>
+
+    </body>
+
+    </html>
+
+    '

@@ -1,0 +1,10 @@
+# Yii Framework Debug Toolbar / Gii 代码生成器
+- method: GET
+  path: "/debug"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "nginx"
+    X-Powered-By: "Yii Framework"
+  body: |
+    <!DOCTYPE html><html><head><title>Yii Debugger</title><style>body{font-family:sans-serif;background:#fff;margin:0}.navbar{background:#1e6887;color:#fff;padding:10px 20px;font-size:16px}.navbar a{color:#fff;margin-right:16px;text-decoration:none;font-size:13px}.content{padding:20px}table{border-collapse:collapse;width:100%}th{background:#f5f5f5;padding:8px;text-align:left;border-bottom:2px solid #ddd}td{padding:8px;border-bottom:1px solid #eee}</style></head><body><div class=navbar>Yii Debugger <a href=/debug>Dashboard</a><a href=/debug/default/view>Requests</a><a href=/gii>Gii</a></div><div class=content><h2>Requests</h2><table><tr><th>#</th><th>Method</th><th>URL</th><th>Status</th><th>Time</th></tr><tr><td>142</td><td>GET</td><td>/site/index</td><td>200</td><td>42ms</td></tr></table></div></body></html>

@@ -1,0 +1,28 @@
+- method: GET
+  path: /zipkin
+  status: 200
+  content-type: text/html
+  headers:
+    Server: nginx
+  body: "<!DOCTYPE html>\n<html>\n<head>\n    <title>Zipkin</title>\n    <style>\n\
+    \        body { font-family: 'Helvetica Neue', Arial, sans-serif; background:\
+    \ #fafafa; margin: 0; padding: 20px; }\n        .navbar { background: #6b3e9b;\
+    \ padding: 10px 20px; color: #fff; font-size: 18px; font-weight: bold; margin:\
+    \ -20px -20px 20px -20px; }\n        .navbar a { color: #fff; text-decoration:\
+    \ none; margin-right: 16px; font-size: 14px; font-weight: normal; }\n        .search-box\
+    \ { display: flex; gap: 10px; margin-bottom: 20px; }\n        .search-box input\
+    \ { padding: 8px 12px; border: 1px solid #ccc; border-radius: 3px; font-size:\
+    \ 14px; width: 300px; }\n        .search-box button { padding: 8px 16px; background:\
+    \ #6b3e9b; color: #fff; border: none; border-radius: 3px; cursor: pointer; }\n\
+    \        table { border-collapse: collapse; width: 100%; font-size: 13px; }\n\
+    \        th { background: #f0f0f0; padding: 8px; text-align: left; border-bottom:\
+    \ 2px solid #ddd; }\n        td { padding: 8px; border-bottom: 1px solid #eee;\
+    \ }\n    </style>\n</head>\n<body>\n    <div class=\"navbar\">Zipkin <a href=\"\
+    /zipkin\">Home</a><a href=\"#\">Find a trace</a><a href=\"#\">Dependencies</a></div>\n\
+    \    <h2>Find a trace</h2>\n    <div class=\"search-box\">\n        <input type=\"\
+    text\" placeholder=\"serviceName=backend\">\n        <button>Search</button>\n\
+    \    </div>\n    <table>\n    <tr><th>Service</th><th>Span Name</th><th>Duration\
+    \ (ms)</th><th>Timestamp</th></tr>\n    <tr><td>api-gateway</td><td>get /orders</td><td>145</td><td>2025-06-15\
+    \ 14:28:33.421</td></tr>\n    <tr><td>order-service</td><td>query-db</td><td>98</td><td>2025-06-15\
+    \ 14:28:33.502</td></tr>\n    <tr><td>payment-service</td><td>process-payment</td><td>234</td><td>2025-06-15\
+    \ 14:28:33.189</td></tr>\n    </table>\n</body>\n</html>\n"

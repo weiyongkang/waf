@@ -1,0 +1,20 @@
+- method: GET
+  path: /stats
+  status: 200
+  content-type: text/html
+  headers:
+    Server: nginx/1.24.0
+  body: "<!DOCTYPE html>\n<html>\n<head>\n    <title>HAProxy Stats</title>\n    <style>\n\
+    \        body { font-family: monospace; background: #fff; margin: 12px; color:\
+    \ #333; }\n        h1 { font-size: 16px; color: #000; }\n        table { border-collapse:\
+    \ collapse; font-size: 12px; width: 100%; }\n        th { background: #eee; padding:\
+    \ 4px 8px; text-align: left; border: 1px solid #ccc; }\n        td { padding:\
+    \ 4px 8px; border: 1px solid #e0e0e0; }\n        .up { color: #006600; }\n   \
+    \     .down { color: #cc0000; }\n    </style>\n</head>\n<body>\n    <h1>HAProxy\
+    \ Statistics Report</h1>\n    <p>pid = 15284, uptime = 12d 7h, version = 2.8.5</p>\n\
+    \    <table>\n    <tr><th>pxname</th><th>svname</th><th>status</th><th>act</th><th>bck</th><th>qcur</th><th>scur</th><th>bin</th><th>bout</th></tr>\n\
+    \    <tr><td>frontend-main</td><td>FRONTEND</td><td class=\"up\">OPEN</td><td></td><td></td><td>0</td><td>28</td><td>8273641</td><td>12473648</td></tr>\n\
+    \    <tr><td>backend-api</td><td>server1</td><td class=\"up\">UP</td><td>1</td><td>0</td><td>0</td><td>12</td><td>4236472</td><td>7124365</td></tr>\n\
+    \    <tr><td>backend-api</td><td>server2</td><td class=\"up\">UP</td><td>1</td><td>0</td><td>0</td><td>16</td><td>4037169</td><td>5349283</td></tr>\n\
+    \    <tr><td>backend-web</td><td>server3</td><td class=\"down\">DOWN</td><td>1</td><td>0</td><td>0</td><td>-</td><td>-</td><td>-</td></tr>\n\
+    \    </table>\n</body>\n</html>\n"

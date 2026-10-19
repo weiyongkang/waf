@@ -1,0 +1,10 @@
+# 金蝶云星空 K3Cloud 登录接口
+- method: POST
+  path: "/k3cloud/Kingdee.BOS.WebApi.ServicesStub/AuthService.Login"
+  status: 200
+  content-type: application/json
+  headers:
+    Server: "nginx"
+    Content-Type: "application/json;charset=UTF-8"
+  body: |
+    {"LoginResultType":1,"Message":"","Context":{"UserID":"10001","UserName":"系统管理员","DatabaseAccount":"k3cloud_prod"}}

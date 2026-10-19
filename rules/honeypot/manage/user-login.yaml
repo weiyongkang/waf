@@ -1,0 +1,23 @@
+- method: GET
+  path: /user/login
+  status: 200
+  content-type: text/html
+  headers:
+    Server: nginx
+  body: "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"UTF-8\"\
+    >\n    <title>Drupal › Log in</title>\n    <style>\n        body { font-family:\
+    \ 'Lucida Grande', 'Lucida Sans Unicode', Verdana, sans-serif; background: #e9e9e9;\
+    \ display: flex; justify-content: center; align-items: center; height: 100vh;\
+    \ margin: 0; }\n        .login-box { background: #fff; padding: 40px; border-radius:\
+    \ 4px; width: 340px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }\n        .login-box\
+    \ h2 { text-align: center; color: #0678be; margin-bottom: 24px; font-size: 20px;\
+    \ font-weight: normal; }\n        .login-box input { width: 100%; padding: 10px;\
+    \ margin-bottom: 14px; border: 1px solid #ccc; border-radius: 2px; box-sizing:\
+    \ border-box; font-size: 14px; }\n        .login-box button { width: 100%; padding:\
+    \ 10px; background: #0678be; color: #fff; border: none; border-radius: 2px; cursor:\
+    \ pointer; font-size: 15px; }\n    </style>\n</head>\n<body>\n    <div class=\"\
+    login-box\">\n        <h2>Drupal</h2>\n        <form method=\"POST\" action=\"\
+    /user/login\">\n            <input type=\"text\" name=\"name\" placeholder=\"\
+    Username\">\n            <input type=\"password\" name=\"pass\" placeholder=\"\
+    Password\">\n            <button type=\"submit\">Log in</button>\n        </form>\n\
+    \    </div>\n</body>\n</html>\n"

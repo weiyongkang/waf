@@ -1,0 +1,11 @@
+# 齐治堡垒机 登录页
+- method: GET
+  path: "/bastion/login"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "nginx"
+  body: |
+    <!DOCTYPE html><html lang=zh-CN><head><meta charset=utf-8><title>齐治堡垒机</title>
+    <style>body{font-family:"Microsoft YaHei",sans-serif;background:#1a1a2e;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#16213e;padding:44px;border-radius:8px;width:360px;color:#e0e0e0;box-shadow:0 4px 24px rgba(0,0,0,.3)}.login-box .logo{text-align:center;color:#0f9;font-size:22px;font-weight:bold;margin-bottom:28px}.login-box input{width:100%;padding:10px;margin-bottom:14px;background:#1a1a2e;border:1px solid #333;border-radius:3px;color:#e0e0e0;box-sizing:border-box}.login-box button{width:100%;padding:10px;background:#0f9;color:#1a1a2e;border:none;border-radius:3px;cursor:pointer;font-weight:bold}</style></head>
+    <body><div class=login-box><div class=logo>齐治堡垒机</div><form method=POST action=/bastion/auth/login><input type=text name=username placeholder=用户名><input type=password name=password placeholder=密码><input type=text name=otp placeholder=动态口令（可选）><button type=submit>登 录</button></form></div></body></html>

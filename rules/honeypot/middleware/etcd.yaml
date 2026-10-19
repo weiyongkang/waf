@@ -1,0 +1,18 @@
+- method: GET
+  path: /etcd
+  status: 200
+  content-type: text/html
+  headers:
+    Server: nginx
+  body: "<!DOCTYPE html>\n<html>\n<head>\n    <title>etcd K/V</title>\n    <style>\n\
+    \        body { font-family: monospace; background: #1e1e1e; color: #d4d4d4; padding:\
+    \ 24px; }\n        h1 { color: #569cd6; font-size: 18px; }\n        .kv { margin:\
+    \ 8px 0; padding: 6px 12px; background: #2d2d2d; border-radius: 3px; }\n     \
+    \   .key { color: #9cdcfe; }\n        .value { color: #ce9178; margin-left: 16px;\
+    \ }\n    </style>\n</head>\n<body>\n    <h1>etcd v3.5.14</h1>\n    <div class=\"\
+    kv\"><span class=\"key\">/registry/namespaces/default</span><span class=\"value\"\
+    >{\"kind\":\"Namespace\",\"apiVersion\":\"v1\"}</span></div>\n    <div class=\"\
+    kv\"><span class=\"key\">/registry/configmaps/kube-system/coredns</span><span\
+    \ class=\"value\">{\"data\":{\"Corefile\":\".:53 {...}\"}}</span></div>\n    <div\
+    \ class=\"kv\"><span class=\"key\">/registry/pods/default/nginx-7d4b5c6f8-x2p9k</span><span\
+    \ class=\"value\">{\"kind\":\"Pod\",\"spec\":{...}}</span></div>\n</body>\n</html>\n"

@@ -1,0 +1,11 @@
+# 蓝凌 Landray EKP 登录接口
+- method: POST
+  path: "/ekp/servlet/login"
+  status: 302
+  content-type: text/html
+  headers:
+    Server: "nginx"
+    Location: "/ekp/index.jsp"
+    Set-Cookie: "LtpaToken=landray_token_2025; Path=/ekp"
+  body: |
+    <!DOCTYPE html><html><head><meta http-equiv=refresh content="0;url=/ekp/index.jsp"></head><body></body></html>

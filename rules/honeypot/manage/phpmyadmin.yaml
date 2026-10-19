@@ -1,0 +1,24 @@
+- method: GET
+  path: /phpMyAdmin
+  status: 200
+  content-type: text/html
+  headers:
+    Server: Apache
+  body: "<!DOCTYPE html>\n<html lang=\"en\" dir=\"ltr\">\n<head>\n    <meta charset=\"\
+    utf-8\">\n    <title>phpMyAdmin</title>\n    <style>\n        body { font-family:\
+    \ 'Helvetica Neue', Arial, sans-serif; background: #f9f9f9; display: flex; justify-content:\
+    \ center; align-items: center; height: 100vh; margin: 0; }\n        .container\
+    \ { text-align: center; }\n        .logo { font-size: 32px; color: #333; margin-bottom:\
+    \ 10px; }\n        .logo span { color: #f07818; }\n        .login-box { background:\
+    \ #fff; padding: 36px; border: 1px solid #ddd; border-radius: 4px; width: 320px;\
+    \ margin: 0 auto; text-align: left; }\n        .login-box input { width: 100%;\
+    \ padding: 8px 10px; margin-bottom: 16px; border: 1px solid #ccc; border-radius:\
+    \ 3px; box-sizing: border-box; }\n        .login-box button { width: 100%; padding:\
+    \ 10px; background: #f07818; color: #fff; border: none; border-radius: 3px; cursor:\
+    \ pointer; font-size: 15px; }\n    </style>\n</head>\n<body>\n    <div class=\"\
+    container\">\n        <div class=\"logo\">php<span>My</span>Admin</div>\n    \
+    \    <div class=\"login-box\">\n            <form method=\"POST\" action=\"/phpMyAdmin/index.php\"\
+    >\n                <input type=\"text\" name=\"pma_username\" placeholder=\"Username\"\
+    >\n                <input type=\"password\" name=\"pma_password\" placeholder=\"\
+    Password\">\n                <button type=\"submit\">Log in</button>\n       \
+    \     </form>\n        </div>\n    </div>\n</body>\n</html>\n"

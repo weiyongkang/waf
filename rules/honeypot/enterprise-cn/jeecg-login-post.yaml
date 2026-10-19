@@ -1,0 +1,10 @@
+# JEECG-Boot 登录接口
+- method: POST
+  path: "/jeecg-boot/sys/login"
+  status: 200
+  content-type: application/json
+  headers:
+    Server: "nginx"
+    Content-Type: "application/json;charset=UTF-8"
+  body: |
+    {"success":true,"message":"登录成功","result":{"token":"jeecg_token_xyz789","userInfo":{"id":"admin","realname":"系统管理员","avatar":"","orgCode":"A01"}},"code":0,"timestamp":1718620338421}

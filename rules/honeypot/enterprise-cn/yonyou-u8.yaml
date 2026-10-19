@@ -1,0 +1,10 @@
+# 用友 U8 企业管理软件
+- method: GET
+  path: "/u8/"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: "IIS/10.0"
+    X-AspNet-Version: "4.0.30319"
+  body: |
+    <!DOCTYPE html><html lang=zh-CN><head><meta charset=utf-8><title>用友U8+</title><style>body{font-family:"Microsoft YaHei",sans-serif;background:#fff;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{border:1px solid #d0d0d0;padding:36px;width:340px}.login-box .logo{text-align:center;background:#1e5494;color:#fff;padding:12px 0;font-size:18px;font-weight:bold;margin:-36px -36px 28px}.login-box input{width:100%;padding:8px;margin-bottom:12px;border:1px solid #ccc;box-sizing:border-box;font-size:13px}.login-box button{width:100%;padding:8px;background:#1e5494;color:#fff;border:none;cursor:pointer}</style></head><body><div class=login-box><div class=logo>U8+ 企业管理软件</div><form method=POST action=/u8/login><input type=text name=username placeholder=操作员><input type=password name=password placeholder=密码><select style=width:100%;padding:8px><option>账套001</option></select><button type=submit>登 录</button></form></div></body></html>

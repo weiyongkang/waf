@@ -1,0 +1,13 @@
+# Atlassian Jira 登录页
+- method: GET
+  path: "/jira"
+  status: 200
+  content-type: text/html
+  headers:
+    Server: nginx
+  body: |
+    <!DOCTYPE html>
+    <html lang="en">
+    <head><meta charset="utf-8"><title>Jira</title>
+    <style>body{font-family:-apple-system,sans-serif;background:#f4f5f7;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:#fff;padding:40px;width:360px;box-shadow:0 4px 8px rgba(0,0,0,.08);border-radius:3px}.login-box .logo{text-align:center;color:#0052cc;font-size:24px;font-weight:bold;margin-bottom:28px}.login-box input{width:100%;padding:10px;margin-bottom:14px;border:1px solid #dfe1e6;border-radius:3px;box-sizing:border-box}.login-box button{width:100%;padding:10px;background:#0052cc;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:15px}</style></head>
+    <body><div class="login-box"><div class="logo">Jira</div><form method="POST" action="/jira/login.jsp"><input type="text" name="os_username" placeholder="Username"><input type="password" name="os_password" placeholder="Password"><button type="submit">Log in</button></form></div></body></html>

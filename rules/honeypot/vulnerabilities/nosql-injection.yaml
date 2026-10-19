@@ -1,0 +1,9 @@
+# NoSQL 注入探测 (MongoDB)
+- method: POST
+  path: "/api/login"
+  status: 200
+  content-type: application/json
+  headers:
+    Server: "nginx"
+  body: |
+    {"status":"success","token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImFkbWluIiwicm9sZSI6ImFkbWluIn0.abc123def456","user":{"username":"admin","role":"admin","email":"admin@company.local"}}

@@ -1,0 +1,27 @@
+- method: GET
+  path: /administrator
+  status: 200
+  content-type: text/html
+  headers:
+    Server: Apache/2.4.57
+  body: "<!DOCTYPE html>\n<html lang=\"en-gb\" dir=\"ltr\">\n<head>\n    <meta charset=\"\
+    utf-8\">\n    <title>Joomla! Administration Login</title>\n    <style>\n     \
+    \   body { font-family: Arial, sans-serif; background: #f5f5f5; display: flex;\
+    \ justify-content: center; align-items: center; height: 100vh; margin: 0; }\n\
+    \        .login-box { background: #fff; padding: 36px; border-radius: 4px; border:\
+    \ 1px solid #e0e0e0; width: 360px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }\n\
+    \        .login-box .logo { text-align: center; margin-bottom: 24px; font-size:\
+    \ 22px; color: #2b6fb6; font-weight: bold; }\n        .login-box input { width:\
+    \ 100%; padding: 10px 12px; margin-bottom: 14px; border: 1px solid #ccc; border-radius:\
+    \ 3px; box-sizing: border-box; font-size: 14px; }\n        .login-box button {\
+    \ width: 100%; padding: 10px; background: #2b6fb6; color: #fff; border: none;\
+    \ border-radius: 3px; cursor: pointer; font-size: 15px; }\n        .login-box\
+    \ button:hover { background: #1e5a9a; }\n        .login-box .lang { text-align:\
+    \ center; margin-top: 18px; font-size: 12px; color: #999; }\n    </style>\n</head>\n\
+    <body>\n    <div class=\"login-box\">\n        <div class=\"logo\">Joomla! Administration</div>\n\
+    \        <form method=\"POST\" action=\"/administrator/index.php\">\n        \
+    \    <input type=\"text\" name=\"username\" placeholder=\"Username\">\n      \
+    \      <input type=\"password\" name=\"passwd\" placeholder=\"Password\">\n  \
+    \          <button type=\"submit\">Log in</button>\n        </form>\n        <div\
+    \ class=\"lang\">Language: English (United Kingdom)</div>\n    </div>\n</body>\n\
+    </html>\n"
